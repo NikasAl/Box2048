@@ -280,6 +280,10 @@ export class GameScene extends Phaser.Scene {
 
   private spawnNext(): void {
     if (!this.canLaunch) return;
+    // Defensive: don't spawn a second floating cube if one is already waiting.
+    // (In normal flow this should never trigger, but it guards against any
+    // double-timer race that could slip through.)
+    if (this.currentCube && this.currentCube.isFloating()) return;
     const value = this.nextValue;
     this.currentCube = this.spawner.spawnFloating(value);
     this.cubes.add(this.currentCube);
@@ -308,6 +312,11 @@ export class GameScene extends Phaser.Scene {
 
   private launchCurrentCube(targetX: number, targetY: number): void {
     if (!this.currentCube) return;
+    // Guard against double-launch: if currentCube is already launched
+    // (e.g., due to a tap firing in the same frame as a queued-tap launch),
+    // do nothing and don't schedule another spawn timer — otherwise
+    // two timers would fire 200ms later and spawn two cubes at the same spot.
+    if (this.currentCube.isLaunched()) return;
     const cube = this.currentCube;
     const dx = targetX - cube.x;
     const dy = targetY - cube.y;
@@ -325,13 +334,16 @@ export class GameScene extends Phaser.Scene {
       this.canLaunch = true;
       this.spawnNext();
       // After spawning, check if there's a queued tap to apply immediately.
+      // We call launchCurrentCube SYNCHRONOUSLY (not via delayedCall(0))
+      // to eliminate the one-frame race window where a real pointerdown
+      // could fire between spawnNext() and the deferred launch, causing
+      // launchCurrentCube to be called twice and scheduling two spawn timers.
       if (this.queuedTap) {
         const age = this.time.now - this.queuedTap.t;
         if (age < TAP_QUEUE_WINDOW_MS + NEXT_CUBE_DELAY_MS) {
           const q = this.queuedTap;
           this.queuedTap = null;
-          // Launch on next frame to ensure the cube is fully spawned.
-          this.time.delayedCall(0, () => this.launchCurrentCube(q.x, q.y));
+          this.launchCurrentCube(q.x, q.y);
         } else {
           this.queuedTap = null;
         }
