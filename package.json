@@ -9,6 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "icons": "python3 scripts/generate_icons.py",
+    "icons:preview": "python3 scripts/preview_icon.py",
     "cap:sync": "npm run build && cap sync",
     "cap:add:android": "cap add android",
     "cap:open:android": "cap open android",

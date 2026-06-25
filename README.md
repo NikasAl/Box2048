@@ -13,6 +13,57 @@
 | Нативная обёртка | Capacitor 6 |
 | Реклама | Yandex Mobile Ads SDK (через Capacitor-плагин) |
 
+## Иконка приложения
+
+### Дизайн
+
+Исходник иконки — `public/assets/icon.svg`. Это векторный файл, из которого
+генерируются все PNG-размеры для Android.
+
+Концепция:
+- Тёмно-синий фон (как фон игры, `#1a1a2e`)
+- Оранжево-красный куб в центре (цвета 16/32 в палитре 2048)
+- Белая надпись «2048» жирным шрифтом
+- Тонкая красная линия сверху (отсылка к danger line в игре)
+- Жёлтые искры в углах (отсылка к слиянию/энергии)
+
+### Генерация иконок для Android
+
+После создания `android/` (`npm run cap:add:android`) запустите:
+
+```bash
+npm run icons
+```
+
+Скрипт `scripts/generate_icons.py` сделает следующее:
+- Сгенерирует `ic_launcher.png` и `ic_launcher_round.png` для всех плотностей (mdpi → xxxhdpi)
+- Сгенерирует `ic_launcher_foreground.png` для adaptive icons (Android 8+)
+- Создаст `mipmap-anydpi-v26/ic_launcher.xml` — объявление adaptive icon
+- Создаст `values/ic_launcher_background.xml` — цвет фона adaptive icon
+- Сгенерирует `playstore-icon.png` 512×512 для публикации в Google Play / RuStore
+
+Требования: `pip install cairosvg pillow`
+
+### Превью иконки (без Android-сборки)
+
+Если хотите посмотреть дизайн иконки без сборки Android:
+
+```bash
+npm run icons:preview
+# → /home/z/my-project/download/box2048-icon-{512,192,96,48}.png
+```
+
+### Изменение дизайна
+
+Отредактируйте `public/assets/icon.svg` (это векторный исходник), затем
+повторно запустите `npm run icons` (или `npm run icons:preview` для превью).
+
+После изменения иконки — пересоберите APK:
+```bash
+npm run android:debug
+adb install android/app/build/outputs/apk/debug/app-debug.apk
+```
+
 ## Запуск в браузере (отладка)
 
 ```bash
