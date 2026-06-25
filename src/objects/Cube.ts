@@ -59,11 +59,10 @@ export class Cube extends Phaser.Physics.Matter.Sprite {
     this.setDisplaySize(getCubeSize(value), getCubeSize(value));
     // For Matter sprites, the body shape matches the texture size by default.
     scene.add.existing(this);
-    // Lock rotation for launched cubes — squares in 2048 should stay axis-aligned.
-    // Floating cubes don't need this (they're static and we set angle=0 in update).
-    if (!floating) {
-      this.setFixedRotation();
-    }
+    // NOTE: we deliberately do NOT call setFixedRotation() — we want cubes
+    // to rotate and roll naturally like real wooden blocks. Angular damping
+    // is achieved via frictionAir (applied to angular velocity too) and
+    // via friction when cubes come to rest on each other.
   }
 
   isFloating(): boolean {
@@ -103,8 +102,9 @@ export class Cube extends Phaser.Physics.Matter.Sprite {
     // Attach the new body to this sprite.
     this.setExistingBody(newBody);
     this.setVelocity(vx, vy);
-    // Lock rotation: cubes should not spin after launch.
-    this.setFixedRotation();
+    // NOTE: no setFixedRotation() — cubes roll naturally.
+    // Reset any residual angular velocity from the floating state.
+    this.setAngularVelocity(0);
     this.state = 'launched';
   }
 

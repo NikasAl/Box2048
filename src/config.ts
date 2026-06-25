@@ -26,19 +26,34 @@ export const SPAWN_X = GAME_WIDTH / 2;
 export const SPAWN_Y = 110;
 
 // Physics tuning for cubes.
-// - Low restitution: cubes should settle, not bounce forever.
-// - High friction: cubes stack stably without sliding.
-// - frictionAir: dampens motion so cubes come to rest.
-// - inertia: Infinity (via setFixedRotation) prevents rotation entirely,
-//   which is what we want for a 2048-style game (cubes stay axis-aligned).
+// We want cubes to ROTATE and ROLL naturally (like real wooden blocks),
+// but motion should dampen over time so the field eventually settles.
+//
+// - friction (cube↔cube and cube↔wall): high enough that cubes grip
+//   each other and roll down slopes, but not so high they stick forever.
+// - frictionStatic: low so a cube can start sliding when something pushes it.
+// - frictionAir: dampens BOTH linear AND angular velocity every tick.
+//   This is the key parameter for "rolling damping" — without it, a cube
+//   that starts spinning will spin forever.
+// - restitution: low, so cubes don't bounce and perpetuate motion.
+// - chamfer: small rounded corners so cubes actually roll on edges
+//   instead of catching on sharp 90° corners.
 export const CUBE_PHYSICS = {
   restitution: 0.05,
-  friction: 0.6,
-  frictionStatic: 0.8,
-  frictionAir: 0.02,
+  friction: 0.4,
+  frictionStatic: 0.3,
+  frictionAir: 0.025,
   density: 0.002,
   isStatic: false,
   chamfer: { radius: 6 }
+};
+
+// Wall (floor + side walls) friction tuning.
+// Lower friction here so cubes can slide along walls and settle at the bottom.
+export const WALL_PHYSICS = {
+  isStatic: true,
+  friction: 0.3,
+  restitution: 0.05
 };
 
 // Launch tuning: how fast the cube is thrown toward the tap point.

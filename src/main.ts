@@ -25,12 +25,15 @@ const config: Phaser.Types.Core.GameConfig = {
     matter: {
       gravity: { x: 0, y: 1.2 },
       debug: false,
-      // Improve resting stability for stacked cubes.
-      enableSleeping: true,
-      // Constrain to improve stack stability.
-      constraintIterations: 4,
-      positionIterations: 8,
-      velocityIterations: 8
+      // Sleeping DISABLED. With sleeping enabled, cubes that come to rest
+      // don't wake up reliably when another cube lands on them or pushes
+      // them — they freeze in unstable positions and never roll off.
+      // For a small field with <50 cubes, the perf cost is negligible.
+      enableSleeping: false,
+      // Higher iteration counts = more stable stacking.
+      constraintIterations: 6,
+      positionIterations: 10,
+      velocityIterations: 10
     }
   },
   input: {

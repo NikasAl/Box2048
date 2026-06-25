@@ -30,7 +30,8 @@ import {
   STORAGE_KEYS,
   NEXT_CUBE_DELAY_MS,
   LAUNCH_SPEED,
-  LAUNCH_MAX_SPEED
+  LAUNCH_MAX_SPEED,
+  WALL_PHYSICS
 } from '../config';
 import { Cube } from '../objects/Cube';
 import { Spawner } from '../objects/Spawner';
@@ -107,11 +108,13 @@ export class GameScene extends Phaser.Scene {
 
     // Keep the current (un-launched) cube floating at the top.
     if (this.currentCube && this.currentCube.isFloating()) {
-      // Hover above spawn point, gently bobbing.
-      const bob = Math.sin(this.time.now / 400) * 4;
+      // Hover above spawn point, gently bobbing vertically.
+      // We don't force angle=0 — instead we let it wobble slightly to feel alive.
+      const t = this.time.now / 400;
+      const bob = Math.sin(t) * 4;
+      const wobble = Math.sin(t * 0.7) * 4; // small angle wobble in degrees
       this.currentCube.setPosition(SPAWN_X, SPAWN_Y + bob);
-      // Cancel any rotation for visual cleanliness while aiming.
-      this.currentCube.setAngle(0);
+      this.currentCube.setAngle(wobble);
     }
   }
 
@@ -129,7 +132,7 @@ export class GameScene extends Phaser.Scene {
 
     // Solid static walls: left, right, bottom. The top is open (cubes spawn there).
     const wallThickness = 60;
-    const wallOptions = { isStatic: true, friction: 0.4, restitution: 0.1 };
+    const wallOptions = WALL_PHYSICS;
     const wallY = FIELD_BOTTOM + wallThickness / 2;
     const bottomWall = this.matter.add.rectangle(
       (FIELD_LEFT + FIELD_RIGHT) / 2,
