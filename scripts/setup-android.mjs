@@ -309,7 +309,13 @@ public class YandexAdsPlugin extends Plugin {
                     rewardedAdLoader = new RewardedAdLoader(getContext());
                 }
 
-                rewardedAdLoader.setAdLoadListener(new RewardedAdLoadListener() {
+                // SDK 8.x: AdRequest replaces the removed AdRequestConfiguration.
+                final AdRequest adRequest = new AdRequest.Builder(adUnitId).build();
+                android.util.Log.i("YandexAds", "Loading ad with unitId=" + adUnitId);
+
+                // SDK 8.x BREAKING CHANGE: setAdLoadListener() was removed.
+                // The listener is now passed directly to loadAd() as the 2nd arg.
+                rewardedAdLoader.loadAd(adRequest, new RewardedAdLoadListener() {
                     @Override
                     public void onAdLoaded(@NonNull final RewardedAd ad) {
                         android.util.Log.i("YandexAds", "Ad loaded, showing...");
@@ -361,11 +367,6 @@ public class YandexAdsPlugin extends Plugin {
                         rejectAdResult("Ad failed to load: " + adRequestError);
                     }
                 });
-
-                // SDK 8.x: AdRequest replaces the removed AdRequestConfiguration.
-                final AdRequest adRequest = new AdRequest.Builder(adUnitId).build();
-                android.util.Log.i("YandexAds", "Loading ad with unitId=" + adUnitId);
-                rewardedAdLoader.loadAd(adRequest);
             } catch (Exception e) {
                 android.util.Log.e("YandexAds", "Exception in showRewardedAd: " + e.getMessage(), e);
                 resolveAdResult(false, "Exception: " + e.getMessage());
@@ -406,7 +407,13 @@ public class YandexAdsPlugin extends Plugin {
                     interstitialAdLoader = new InterstitialAdLoader(getContext());
                 }
 
-                interstitialAdLoader.setAdLoadListener(new InterstitialAdLoadListener() {
+                // SDK 8.x: AdRequest replaces the removed AdRequestConfiguration.
+                final AdRequest adRequest = new AdRequest.Builder(adUnitId).build();
+                android.util.Log.i("YandexAds", "Loading interstitial ad with unitId=" + adUnitId);
+
+                // SDK 8.x BREAKING CHANGE: setAdLoadListener() was removed.
+                // The listener is now passed directly to loadAd() as the 2nd arg.
+                interstitialAdLoader.loadAd(adRequest, new InterstitialAdLoadListener() {
                     @Override
                     public void onAdLoaded(@NonNull final InterstitialAd ad) {
                         android.util.Log.i("YandexAds", "Interstitial ad loaded, showing...");
@@ -446,11 +453,6 @@ public class YandexAdsPlugin extends Plugin {
                         resolveInterstitialResult(false, "Failed to load: " + adRequestError);
                     }
                 });
-
-                // SDK 8.x: AdRequest replaces the removed AdRequestConfiguration.
-                final AdRequest adRequest = new AdRequest.Builder(adUnitId).build();
-                android.util.Log.i("YandexAds", "Loading interstitial ad with unitId=" + adUnitId);
-                interstitialAdLoader.loadAd(adRequest);
             } catch (Exception e) {
                 android.util.Log.e("YandexAds", "Exception in showInterstitialAd: " + e.getMessage(), e);
                 resolveInterstitialResult(false, "Exception: " + e.getMessage());
@@ -583,10 +585,27 @@ console.log('[setup-android] Wrote complete MainActivity.java (immersive + Yande
 
 // ----------------------------------------------------------------------------
 // 7. Add HTTP legacy library to AndroidManifest.xml
-//    Required by Yandex Mobile Ads SDK for network requests
+//    Required by Yandex Mobile Ads SDK for network requests.
+//    Note: we use a plain <uses-library> declaration (no tools:node) to avoid
+//    the warning "tagged to replace another declaration but no other
+//    declaration present" that appears on Android 14+ where the system already
+//    provides this library. We also clean up any previous tools:node="replace"
+//    attribute that older versions of this script may have written.
 // ----------------------------------------------------------------------------
 if (existsSync(manifestPath)) {
   let manifest = readFileSync(manifestPath, 'utf-8');
+  let modified = false;
+
+  // Clean up legacy tools:node="replace" if present (from older script runs).
+  if (manifest.includes('org.apache.http.legacy') && manifest.includes('tools:node="replace"')) {
+    manifest = manifest.replace(
+      /<uses-library android:name="org\.apache\.http\.legacy"[^/]*\/>/,
+      '<uses-library android:name="org.apache.http.legacy" android:required="false" />'
+    );
+    modified = true;
+    console.log('[setup-android] Cleaned up tools:node="replace" on org.apache.http.legacy');
+  }
+
   if (!manifest.includes('org.apache.http.legacy')) {
     if (!manifest.includes('xmlns:tools="http://schemas.android.com/tools"')) {
       manifest = manifest.replace(
@@ -596,12 +615,34 @@ if (existsSync(manifestPath)) {
     }
     manifest = manifest.replace(
       '</application>',
-      '        <uses-library android:name="org.apache.http.legacy" android:required="false" tools:node="replace" />\n    </application>'
+      '        <uses-library android:name="org.apache.http.legacy" android:required="false" />\n    </application>'
     );
-    writeFileSync(manifestPath, manifest, 'utf-8');
+    modified = true;
     console.log('[setup-android] Added HTTP legacy library to AndroidManifest.xml');
-  } else {
+  } else if (!modified) {
     console.log('[setup-android] HTTP legacy library already in AndroidManifest.xml.');
+  }
+
+  if (modified) {
+    writeFileSync(manifestPath, manifest, 'utf-8');
+  }
+}
+
+// ----------------------------------------------------------------------------
+// 8. Suppress compileSdk=35 warning on older Android Gradle Plugin (8.2.x)
+//    Capacitor 6 ships with AGP 8.2.1 which was tested up to compileSdk=34.
+//    Setting compileSdk=35 (required by Google Play as of Aug 2024) triggers
+//    a non-fatal warning. We suppress it explicitly.
+// ----------------------------------------------------------------------------
+const gradlePropsPath = join(androidDir, 'gradle.properties');
+if (existsSync(gradlePropsPath)) {
+  let gprops = readFileSync(gradlePropsPath, 'utf-8');
+  if (!gprops.includes('android.suppressUnsupportedCompileSdk=35')) {
+    gprops += '\n# Suppress compileSdk=35 warning on AGP 8.2.x (tested only up to 34)\nandroid.suppressUnsupportedCompileSdk=35\n';
+    writeFileSync(gradlePropsPath, gprops, 'utf-8');
+    console.log('[setup-android] Added android.suppressUnsupportedCompileSdk=35 to gradle.properties');
+  } else {
+    console.log('[setup-android] suppressUnsupportedCompileSdk already set.');
   }
 }
 
