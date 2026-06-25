@@ -41,6 +41,7 @@ import { MergeSystem } from '../systems/MergeSystem';
 import { ScoreSystem } from '../systems/ScoreSystem';
 import { GameOverDetector } from '../systems/GameOverDetector';
 import { ShockWaveSystem } from '../systems/ShockWaveSystem';
+import { AudioManager } from '../systems/AudioManager';
 import { AdsManager } from '../ads/AdsManager';
 import { i18n } from '../systems/I18n';
 
@@ -73,6 +74,11 @@ export class GameScene extends Phaser.Scene {
   // TAP_QUEUE_WINDOW_MS), we remember the target and apply it as soon as the
   // next cube spawns. This is what makes rapid-fire tapping feel responsive.
   private queuedTap: { x: number; y: number; t: number } | null = null;
+
+  // Reusable particle emitter for merge effects.
+  // Creating a new emitter per merge caused particle-pool churn; reusing one
+  // emitter and just calling emitParticleAt() is much cheaper.
+  private mergeEmitter!: Phaser.GameObjects.Particles.ParticleEmitter;
 
   // UI
   private scoreText!: Phaser.GameObjects.Text;
@@ -121,8 +127,36 @@ export class GameScene extends Phaser.Scene {
     // Listen for merge events to spawn particles + sound.
     this.mergeSystem.onMerge((e) => this.onMerge(e));
 
+    // Create ONE reusable particle emitter for the whole scene.
+    // (Previously we created a new emitter per merge, which caused particle
+    // pool churn and contributed to memory growth during long sessions.)
+    this.mergeEmitter = this.add.particles(0, 0, 'particle', {
+      lifespan: 600,
+      speed: { min: 80, max: 220 },
+      scale: { start: 0.8, end: 0 },
+      quantity: 14,
+      emitting: false
+    });
+    this.mergeEmitter.setDepth(5);
+
+    // Cleanup on scene shutdown — kill any running tweens/timers so they
+    // don't keep firing after the scene is gone (which would leak callbacks
+    // and references to destroyed game objects).
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.tweens.killAll();
+      this.time.removeAllEvents();
+      // Clear the cubes Set so destroyed cubes can be GC'd.
+      this.cubes.clear();
+      this.currentCube = null;
+      this.queuedTap = null;
+    });
+
     // Spawn the first cube.
     this.spawnNext();
+
+    // Unlock audio on first interaction (browsers require a user gesture
+    // before any AudioContext can produce sound).
+    AudioManager.getInstance().unlock();
   }
 
   update(_time: number, deltaMs: number): void {
@@ -393,16 +427,11 @@ export class GameScene extends Phaser.Scene {
     const color = Phaser.Display.Color.IntegerToColor(
       this.lookupCubeColor(value)
     );
-    const emitter = this.add.particles(x, y, 'particle', {
-      lifespan: 600,
-      speed: { min: 80, max: 220 },
-      scale: { start: 0.8, end: 0 },
-      quantity: 14,
-      tint: color.color,
-      emitting: false
-    });
-    emitter.explode(14, x, y);
-    this.time.delayedCall(700, () => emitter.destroy());
+    // Reuse the shared emitter instead of creating a new one each merge.
+    // Phaser 3.86 ParticleEmitter.emitParticleAt takes only (x, y, count),
+    // so we change tint via the emitter's `tint` property before emitting.
+    (this.mergeEmitter as any).tint = color.color;
+    this.mergeEmitter.emitParticleAt(x, y, 14);
   }
 
   private lookupCubeColor(value: number): number {
@@ -427,29 +456,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private playMergeSound(value: number): void {
-    // Minimal WebAudio "pop" — pitch rises with cube value.
-    try {
-      const AudioCtx =
-        window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioCtx) return;
-      const ctx = AudioCtx ? new AudioCtx() : null;
-      if (!ctx) return;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      const baseFreq = 220;
-      const semitones = Math.log2(value);
-      osc.frequency.value = baseFreq * Math.pow(2, semitones / 12);
-      osc.type = 'triangle';
-      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.25);
-      osc.connect(gain).connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.26);
-      osc.onended = () => ctx.close();
-    } catch {
-      /* sound is non-critical */
-    }
+    // Delegated to the shared AudioManager — uses a single AudioContext
+    // for the entire game instead of creating one per sound.
+    AudioManager.getInstance().playMergePop(value);
   }
 
   // -------------------------------------------------------------------------
