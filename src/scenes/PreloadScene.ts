@@ -1,7 +1,9 @@
 /**
- * PreloadScene: generates all cube textures programmatically (no external
- * sprites required for the prototype). When the assets are ready, jumps
- * to the main menu.
+ * PreloadScene: generates all cube textures programmatically using
+ * CanvasTexture API (more reliable than Graphics+RenderTexture compositing).
+ *
+ * Each cube texture is a rounded rectangle with the cube's color and its
+ * numeric value drawn in the center.
  */
 
 import Phaser from 'phaser';
@@ -12,24 +14,17 @@ export class PreloadScene extends Phaser.Scene {
     super({ key: 'PreloadScene' });
   }
 
-  preload(): void {
-    // Generate a circle "particle" texture for merge effects.
-    this.makeParticleTexture();
-    // Generate all cube textures up front so merges to higher values
-    // don't cause hitches during gameplay.
-    this.makeCubeTextures();
-  }
-
+  /**
+   * Note: texture generation runs in create(), not preload().
+   * CanvasTexture and this.textures API require the scene to be active,
+   * which only happens once create() is entered.
+   */
   create(): void {
+    this.makeParticleTexture();
+    this.makeCubeTextures();
     this.scene.start('MenuScene');
   }
 
-  /**
-   * Each cube value gets its own texture key: 'cube-2', 'cube-4', ...
-   * The texture is a rounded rectangle filled with the cube's color,
-   * with the value as text drawn on top. Drawing text into a texture
-   * avoids re-rendering text every frame during gameplay.
-   */
   private makeCubeTextures(): void {
     const allValues: number[] = [...SPAWN_VALUES];
     for (let v = 32; v <= MAX_CUBE_VALUE; v *= 2) {
@@ -44,46 +39,89 @@ export class PreloadScene extends Phaser.Scene {
       };
       const size = style.size;
       const radius = 10;
-      const padding = 6;
+      const fontSize = value < 100 ? 30 : value < 1000 ? 24 : 20;
 
-      const g = this.add.graphics();
-      g.fillStyle(style.bg, 1);
-      // Slight 3D shading: darker bottom strip for depth.
-      g.fillRoundedRect(0, 0, size, size, radius);
-      g.fillStyle(0x000000, 0.18);
-      g.fillRect(0, size - 6, size, 6);
-      g.fillStyle(0xffffff, 0.12);
-      g.fillRoundedRect(0, 0, size, size - 4, radius);
+      const canvas = this.textures.createCanvas(`cube-${value}`, size, size);
+      if (!canvas) {
+        console.error(`[PreloadScene] Failed to create canvas for cube-${value}`);
+        continue;
+      }
+      const ctx = canvas.getContext();
 
-      g.generateTexture(`cube-${value}`, size, size);
-      g.destroy();
+      // Background (rounded rect) — solid fill
+      ctx.fillStyle = this.hex(style.bg);
+      this.drawRoundRect(ctx, 0, 0, size, size, radius);
+      ctx.fill();
 
-      // Render the value text on top via a Text -> texture.
-      const fontSize = value < 100 ? 28 : value < 1000 ? 24 : 20;
-      const text = this.add.text(size / 2, size / 2 - 1, String(value), {
-        fontFamily: 'Arial Black, Arial, sans-serif',
-        fontSize: `${fontSize}px`,
-        color: `#${style.text.toString(16).padStart(6, '0')}`,
-        align: 'center'
-      });
-      text.setOrigin(0.5);
+      // Subtle bottom shadow strip for depth
+      ctx.fillStyle = 'rgba(0,0,0,0.20)';
+      this.drawRoundRect(ctx, 0, size - 8, size, 8, { tl: 0, tr: 0, bl: radius, br: radius } as any);
+      ctx.fill();
 
-      // Composite text onto the cube texture using a RenderTexture.
-      const rt = this.add.renderTexture(0, 0, size, size);
-      rt.setVisible(false);
-      rt.draw(`cube-${value}`, 0, 0);
-      rt.draw(text, 0, 0);
-      rt.saveTexture(`cube-${value}`);
-      rt.destroy();
-      text.destroy();
+      // Top inner highlight (glossy look)
+      ctx.fillStyle = 'rgba(255,255,255,0.15)';
+      this.drawRoundRect(ctx, 3, 3, size - 6, size * 0.45, radius - 2);
+      ctx.fill();
+
+      // Border outline
+      ctx.strokeStyle = 'rgba(0,0,0,0.30)';
+      ctx.lineWidth = 2;
+      this.drawRoundRect(ctx, 1, 1, size - 2, size - 2, radius);
+      ctx.stroke();
+
+      // Numeric label
+      ctx.fillStyle = this.hex(style.text);
+      ctx.font = `bold ${fontSize}px Arial, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(value), size / 2, size / 2 + 1);
+
+      canvas.refresh();
     }
   }
 
   private makeParticleTexture(): void {
-    const g = this.add.graphics();
-    g.fillStyle(0xffffff, 1);
-    g.fillCircle(8, 8, 8);
-    g.generateTexture('particle', 16, 16);
-    g.destroy();
+    const size = 16;
+    const canvas = this.textures.createCanvas('particle', size, size);
+    if (!canvas) return;
+    const ctx = canvas.getContext();
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+    ctx.fill();
+    canvas.refresh();
+  }
+
+  private hex(n: number): string {
+    return '#' + n.toString(16).padStart(6, '0');
+  }
+
+  /**
+   * Draws a rounded rectangle path on the given 2D context.
+   * Call ctx.fill() or ctx.stroke() afterwards to actually render it.
+   */
+  private drawRoundRect(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    r: number | { tl: number; tr: number; br: number; bl: number }
+  ): void {
+    const radii =
+      typeof r === 'number'
+        ? { tl: r, tr: r, br: r, bl: r }
+        : r;
+    ctx.beginPath();
+    ctx.moveTo(x + radii.tl, y);
+    ctx.lineTo(x + w - radii.tr, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + radii.tr);
+    ctx.lineTo(x + w, y + h - radii.br);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - radii.br, y + h);
+    ctx.lineTo(x + radii.bl, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - radii.bl);
+    ctx.lineTo(x, y + radii.tl);
+    ctx.quadraticCurveTo(x, y, x + radii.tl, y);
+    ctx.closePath();
   }
 }

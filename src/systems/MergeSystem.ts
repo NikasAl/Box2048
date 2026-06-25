@@ -9,6 +9,11 @@
  *   - The new cube inherits the average position of the two originals,
  *     with a small upward "pop" velocity.
  *   - Score is awarded based on the new value (handled by GameScene).
+ *
+ * CRITICAL: Matter.js does NOT allow modifying the world (adding/removing
+ * bodies) inside a collisionstart callback — doing so causes infinite loops
+ * or hard freezes. We collect the pairs to merge during the callback, then
+ * defer the actual merge to the next tick via `scene.time.delayedCall(0, ...)`.
  */
 
 import Phaser from 'phaser';
@@ -26,10 +31,8 @@ export class MergeSystem {
   private listeners: MergeEventHandler[] = [];
 
   constructor(private scene: GameScene) {
-    // Matter emits 'collisionstart' once per pair per physics step.
     const matter = scene.matter;
     matter.world.on('collisionstart', this.handleCollision, this);
-    // Clean up when the scene shuts down.
     scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       matter.world.off('collisionstart', this.handleCollision, this);
     });
@@ -44,6 +47,8 @@ export class MergeSystem {
 
   private handleCollision(event: any): void {
     const pairs = event.pairs ?? [];
+    const pendingMerges: Array<{ a: Cube; b: Cube }> = [];
+
     for (const pair of pairs) {
       const bodyA = pair.bodyA;
       const bodyB = pair.bodyB;
@@ -61,9 +66,29 @@ export class MergeSystem {
       // triggers a second merge.
       a.merging = true;
       b.merging = true;
-
-      this.mergePair(a, b);
+      pendingMerges.push({ a, b });
     }
+
+    if (pendingMerges.length === 0) return;
+
+    // Defer the actual world mutation to the next tick.
+    // This prevents Matter.js from re-entering the collision callback
+    // with half-destroyed bodies, which is what caused the freeze.
+    const pending = pendingMerges.slice();
+    this.scene.time.delayedCall(0, () => {
+      // Bail out if the scene has been shut down between scheduling and firing.
+      if (!this.scene.scene.isActive() && !this.scene.scene.isVisible()) return;
+      for (const { a, b } of pending) {
+        // The cubes might have been destroyed by an earlier merge in this batch,
+        // or by a scene transition. Check `active` before touching them.
+        if (!a.active || !b.active) continue;
+        try {
+          this.mergePair(a, b);
+        } catch (err) {
+          console.error('[MergeSystem] mergePair threw:', err);
+        }
+      }
+    });
   }
 
   private mergePair(a: Cube, b: Cube): void {
@@ -72,22 +97,23 @@ export class MergeSystem {
     const midX = (a.x + b.x) / 2;
     const midY = (a.y + b.y) / 2;
 
-    // Preserve some of the average momentum + small upward pop.
+    // Capture velocities BEFORE destroying the bodies — after destroy,
+    // body.velocity becomes undefined.
     const aBody = a.body as any;
     const bBody = b.body as any;
     const vx = ((aBody?.velocity?.x ?? 0) + (bBody?.velocity?.x ?? 0)) / 2;
-    const vy = ((aBody?.velocity?.y ?? 0) + (bBody?.velocity?.y ?? 0)) / 2 - 2;
+    const vy = ((aBody?.velocity?.y ?? 0) + (bBody?.velocity?.y ?? 0)) / 2 - 1.5;
 
-    // Remove both cubes from the registry and the world.
+    // Remove both cubes from the registry first, then destroy the bodies.
     scene.unregisterCube(a);
     scene.unregisterCube(b);
     a.destroySelf();
     b.destroySelf();
 
-    // Spawn the merged cube.
+    // Spawn the merged cube (constructor calls setFixedRotation automatically).
     scene.spawnMergedCube(newValue, midX, midY, vx, vy);
 
-    // Notify listeners.
+    // Notify listeners (for particles, sound, score).
     for (const l of this.listeners) {
       l({ newValue, x: midX, y: midY });
     }

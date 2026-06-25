@@ -49,6 +49,7 @@ export class Cube extends Phaser.Physics.Matter.Sprite {
             restitution: CUBE_PHYSICS.restitution,
             friction: CUBE_PHYSICS.friction,
             frictionStatic: CUBE_PHYSICS.frictionStatic,
+            frictionAir: CUBE_PHYSICS.frictionAir,
             density: CUBE_PHYSICS.density,
             chamfer: CUBE_PHYSICS.chamfer
           }
@@ -58,6 +59,11 @@ export class Cube extends Phaser.Physics.Matter.Sprite {
     this.setDisplaySize(getCubeSize(value), getCubeSize(value));
     // For Matter sprites, the body shape matches the texture size by default.
     scene.add.existing(this);
+    // Lock rotation for launched cubes — squares in 2048 should stay axis-aligned.
+    // Floating cubes don't need this (they're static and we set angle=0 in update).
+    if (!floating) {
+      this.setFixedRotation();
+    }
   }
 
   isFloating(): boolean {
@@ -76,6 +82,8 @@ export class Cube extends Phaser.Physics.Matter.Sprite {
    */
   launch(vx: number, vy: number): void {
     if (this.state === 'launched') return;
+    // Kill any tweens still targeting this cube (e.g., floating animations).
+    this.scene.tweens.killTweensOf(this);
     const size = getCubeSize(this.value);
     const newBody = (this.scene.matter.add as any).rectangle(
       this.x,
@@ -87,6 +95,7 @@ export class Cube extends Phaser.Physics.Matter.Sprite {
         restitution: CUBE_PHYSICS.restitution,
         friction: CUBE_PHYSICS.friction,
         frictionStatic: CUBE_PHYSICS.frictionStatic,
+        frictionAir: CUBE_PHYSICS.frictionAir,
         density: CUBE_PHYSICS.density,
         chamfer: CUBE_PHYSICS.chamfer
       }
@@ -94,6 +103,8 @@ export class Cube extends Phaser.Physics.Matter.Sprite {
     // Attach the new body to this sprite.
     this.setExistingBody(newBody);
     this.setVelocity(vx, vy);
+    // Lock rotation: cubes should not spin after launch.
+    this.setFixedRotation();
     this.state = 'launched';
   }
 

@@ -26,13 +26,19 @@ export const SPAWN_X = GAME_WIDTH / 2;
 export const SPAWN_Y = 110;
 
 // Physics tuning for cubes.
+// - Low restitution: cubes should settle, not bounce forever.
+// - High friction: cubes stack stably without sliding.
+// - frictionAir: dampens motion so cubes come to rest.
+// - inertia: Infinity (via setFixedRotation) prevents rotation entirely,
+//   which is what we want for a 2048-style game (cubes stay axis-aligned).
 export const CUBE_PHYSICS = {
-  restitution: 0.15, // bounciness
-  friction: 0.4,
-  frictionStatic: 0.6,
+  restitution: 0.05,
+  friction: 0.6,
+  frictionStatic: 0.8,
+  frictionAir: 0.02,
   density: 0.002,
   isStatic: false,
-  chamfer: { radius: 8 } // rounded corners
+  chamfer: { radius: 6 }
 };
 
 // Launch tuning: how fast the cube is thrown toward the tap point.

@@ -1,6 +1,10 @@
 /**
  * Spawner: creates floating cubes at the top of the playfield.
- * The floating cube is then thrown by the player via GameScene.handlePointerDown.
+ *
+ * Note: we deliberately do NOT add a rotation tween here. A tween would
+ * keep rotating the cube after launch (since the tween targets the sprite's
+ * `angle` property directly), which is the "infinite counterclockwise
+ * rotation" bug. The GameScene handles the floating bob motion in update().
  */
 
 import type Phaser from 'phaser';
@@ -16,14 +20,6 @@ export class Spawner {
    */
   spawnFloating(value: number): Cube {
     const cube = new Cube(this.scene, SPAWN_X, SPAWN_Y, value, true);
-    // Spin gently to give a sense of life.
-    this.scene.tweens.add({
-      targets: cube,
-      angle: cube.angle + 360,
-      duration: 6000,
-      repeat: -1,
-      ease: 'Linear'
-    });
     return cube;
   }
 }
