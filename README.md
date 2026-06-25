@@ -18,11 +18,13 @@
 ### Где что лежит
 
 - `Materials/icon_raw.png` — растровый исходник, который вы предоставляете
-  (может быть на любом фоне, любой размер; фон будет удалён автоматически).
+  (может быть на любом фоне, любой размер; фон используется только для
+  поиска границы artwork, сам artwork вырезается как есть).
 - `public/assets/icon.svg` — альтернативный минималистичный SVG-исходник
   (используется только скриптом `npm run icons:svg`, если вы prefer вектор).
 - `scripts/process_icon.py` — основной скрипт: вырезает artwork из
-  `Materials/icon_raw.png`, удаляет фон, масштабирует под все Android размеры.
+  `Materials/icon_raw.png`, находит границу иконки, вырезает artwork и
+  масштабирует под все Android размеры.
 - `scripts/generate_icons.py` — fallback для SVG-пайплайна.
 
 ### Дизайн
@@ -31,10 +33,13 @@
 Скрипт автоматически:
 1. Определяет цвет фона (сэмплируя 4 угла)
 2. Строит маску пикселей «фон vs artwork» с допуском по цвету
-3. Вырезает artwork по bounding box + добавляет 6% padding
-4. Делает фон прозрачным
-5. Помещает artwork на тёмно-синий фон `#0f0f23` (как фон игры)
-6. Генерирует все Android-размеры (legacy, round, adaptive foreground)
+3. Находит bounding box artwork
+4. **Вырезает artwork как есть** (с оригинальным фоном внутри bbox) + 8% padding
+5. Делает изображение квадратным (добавляет фон на короткие стороны)
+6. Масштабирует во все Android-размеры (legacy, round, adaptive foreground)
+
+> Важно: белый фон **не удаляется** из artwork — он используется только
+> для поиска границы. Иконка сохраняет свой исходный вид.
 
 ### Генерация иконок для Android
 
@@ -58,15 +63,14 @@ npm run icons
 
 ```bash
 npm run icons:preview
-# → /home/z/my-project/download/box2048-icon-{512,192,96,48}.png
-# → /home/z/my-project/download/box2048-icon-round-512.png
-# → /home/z/my-project/download/box2048-icon-transparent-512.png
+# → Materials/icons/box2048-icon-{512,192,96,48}.png
+# → Materials/icons/box2048-icon-round-512.png
 ```
 
 ### Изменение дизайна
 
 1. Замените `Materials/icon_raw.png` на новый исходник.
-2. Прогоните `npm run icons:preview` — посмотрите превью в `download/`.
+2. Прогоните `npm run icons:preview` — посмотрите превью в `Materials/icons/`.
 3. Если нравится — `npm run icons` для генерации в `android/`.
 4. Пересоберите APK:
    ```bash
@@ -74,7 +78,7 @@ npm run icons:preview
    adb install -r android/app/build/outputs/apk/debug/app-debug.apk
    ```
 
-### Если фон не удаляется полностью
+### Если граница определяется неточно
 
 По умолчанию допуск цвета фона = 60 (по каждому RGB каналу). Если фон
 имеет градиент или шум, увеличьте `BG_TOLERANCE` в `scripts/process_icon.py`
