@@ -15,17 +15,26 @@
 
 ## Иконка приложения
 
+### Где что лежит
+
+- `Materials/icon_raw.png` — растровый исходник, который вы предоставляете
+  (может быть на любом фоне, любой размер; фон будет удалён автоматически).
+- `public/assets/icon.svg` — альтернативный минималистичный SVG-исходник
+  (используется только скриптом `npm run icons:svg`, если вы prefer вектор).
+- `scripts/process_icon.py` — основной скрипт: вырезает artwork из
+  `Materials/icon_raw.png`, удаляет фон, масштабирует под все Android размеры.
+- `scripts/generate_icons.py` — fallback для SVG-пайплайна.
+
 ### Дизайн
 
-Исходник иконки — `public/assets/icon.svg`. Это векторный файл, из которого
-генерируются все PNG-размеры для Android.
-
-Концепция:
-- Тёмно-синий фон (как фон игры, `#1a1a2e`)
-- Оранжево-красный куб в центре (цвета 16/32 в палитре 2048)
-- Белая надпись «2048» жирным шрифтом
-- Тонкая красная линия сверху (отсылка к danger line в игре)
-- Жёлтые искры в углах (отсылка к слиянию/энергии)
+Иконка — растровое изображение, которое вы кладёте в `Materials/icon_raw.png`.
+Скрипт автоматически:
+1. Определяет цвет фона (сэмплируя 4 угла)
+2. Строит маску пикселей «фон vs artwork» с допуском по цвету
+3. Вырезает artwork по bounding box + добавляет 6% padding
+4. Делает фон прозрачным
+5. Помещает artwork на тёмно-синий фон `#0f0f23` (как фон игры)
+6. Генерирует все Android-размеры (legacy, round, adaptive foreground)
 
 ### Генерация иконок для Android
 
@@ -35,34 +44,41 @@
 npm run icons
 ```
 
-Скрипт `scripts/generate_icons.py` сделает следующее:
-- Сгенерирует `ic_launcher.png` и `ic_launcher_round.png` для всех плотностей (mdpi → xxxhdpi)
-- Сгенерирует `ic_launcher_foreground.png` для adaptive icons (Android 8+)
-- Создаст `mipmap-anydpi-v26/ic_launcher.xml` — объявление adaptive icon
-- Создаст `values/ic_launcher_background.xml` — цвет фона adaptive icon
-- Сгенерирует `playstore-icon.png` 512×512 для публикации в Google Play / RuStore
+Это прогонит `scripts/process_icon.py --android`, который сгенерирует:
+- `mipmap-{mdpi..xxxhdpi}/ic_launcher.png` — классическая иконка
+- `mipmap-{mdpi..xxxhdpi}/ic_launcher_round.png` — круглая
+- `mipmap-{mdpi..xxxhdpi}/ic_launcher_foreground.png` — adaptive foreground
+- `mipmap-anydpi-v26/ic_launcher.xml` + `ic_launcher_round.xml` — adaptive icon
+- `values/ic_launcher_background.xml` — цвет фона adaptive icon
+- `playstore-icon.png` (512×512) — для Google Play / RuStore
 
-Требования: `pip install cairosvg pillow`
+Требования: `pip install pillow`
 
 ### Превью иконки (без Android-сборки)
-
-Если хотите посмотреть дизайн иконки без сборки Android:
 
 ```bash
 npm run icons:preview
 # → /home/z/my-project/download/box2048-icon-{512,192,96,48}.png
+# → /home/z/my-project/download/box2048-icon-round-512.png
+# → /home/z/my-project/download/box2048-icon-transparent-512.png
 ```
 
 ### Изменение дизайна
 
-Отредактируйте `public/assets/icon.svg` (это векторный исходник), затем
-повторно запустите `npm run icons` (или `npm run icons:preview` для превью).
+1. Замените `Materials/icon_raw.png` на новый исходник.
+2. Прогоните `npm run icons:preview` — посмотрите превью в `download/`.
+3. Если нравится — `npm run icons` для генерации в `android/`.
+4. Пересоберите APK:
+   ```bash
+   npm run android:debug
+   adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+   ```
 
-После изменения иконки — пересоберите APK:
-```bash
-npm run android:debug
-adb install android/app/build/outputs/apk/debug/app-debug.apk
-```
+### Если фон не удаляется полностью
+
+По умолчанию допуск цвета фона = 60 (по каждому RGB каналу). Если фон
+имеет градиент или шум, увеличьте `BG_TOLERANCE` в `scripts/process_icon.py`
+до 80–100. Если наоборот — фон «съедает» края artwork, уменьшите до 30–40.
 
 ## Запуск в браузере (отладка)
 
