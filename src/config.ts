@@ -111,11 +111,22 @@ export const COLORS = {
   buttonPrimaryHover: 0xff6b81
 };
 
-// Ad unit configuration (override in production via capacitor.config.ts).
+// Ad unit configuration.
+// DEMO ad unit IDs from Yandex Mobile Ads documentation — safe for testing,
+// they always serve test creatives and won't get your account flagged.
+// Replace with real IDs from the Yandex Advertising Network dashboard
+// (https://yandex.ru/dev/mobile-ads/) before publishing.
+//
+// Yandex demo IDs (see https://yandex.ru/dev/mobile-ads/doc/dg/android/about-test-adunits.html):
+//   Interstitial (full-screen):  'demo-interstitial-yandex'
+//   Rewarded (video for reward): 'demo-rewarded-yandex'
+//   Banner (not used in this game yet)
 export const ADS_CONFIG = {
-  interstitialAdId: 'demo-interstitial',
-  rewardedAdId: 'demo-rewarded',
-  bannerAdId: 'demo-banner',
+  // Use Yandex's official demo ad unit IDs for development.
+  // Replace these with your real ad unit IDs before release.
+  interstitialAdId: 'demo-interstitial-yandex',
+  rewardedAdId: 'demo-rewarded-yandex',
+  bannerAdId: 'demo-banner-yandex',
   // Show interstitial after every N deaths (1 = every death, 3 = every 3rd death).
   interstitialEveryDeaths: 3,
   // Minimum gap between interstitials, in ms (Yandex policy: at least 60s).

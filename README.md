@@ -143,116 +143,109 @@ npm run android:release
 
 Для release-сборки нужно сгенерировать signing keystore — см. раздел [Release signing](#release-signing) ниже.
 
+## Ориентация и полноэкранный режим
+
+Приложение жестко ограничено **портретной ориентацией** и работает в **полноэкранном immersive mode** (без статус-бара и навигационной панели, с поддержкой cutout/чёлки).
+
+Всё это настраивается автоматически скриптом `scripts/setup-android.mjs`, который запускается после `cap sync` (см. `package.json` → `cap:sync`, `android:debug`, `android:release`). Скрипт делает:
+
+- В `AndroidManifest.xml`: добавляет `android:screenOrientation="portrait"` на `<activity>`
+- В `styles.xml`: тема `Theme.AppCompat.NoActionBar` + `windowFullscreen=true` + `windowNoTitle=true` + `screenOrientation=portrait`
+- В `MainActivity.java`: immersive mode через `WindowInsetsControllerCompat`, скрытие system bars + display cutout, перерегистрация при `onResume`/`onWindowFocusChanged`
+- В `variables.gradle`: `compileSdkVersion=35`, `targetSdkVersion=35`, `androidxCoreVersion=1.12.0` (нужно для `WindowInsetsControllerCompat`)
+
 ## Интеграция Yandex Ads
 
 ### Текущее состояние
 
-В проекте уже есть:
-- `src/ads/AdsManager.ts` — TypeScript-обёртка с интерфейсом `initialize() / showRewarded() / maybeShowInterstitialOnDeath()`. В браузере работает как stub (rewarded возвращает `true`, interstitial no-op), на Android автоматически использует нативный плагин через Capacitor.
-- `capacitor.config.ts` — конфигурация с блоком `plugins.YandexAds` (тестовые ad unit ID).
+Полностью рабочий пайплайн, основанный на паттерне из https://github.com/NikasAl/starflow/tree/main/starflow-3d:
 
-### Что нужно сделать (нативный плагин)
+- **`src/ads/AdsManager.ts`** — TypeScript-обёртка. В браузере работает как stub (rewarded возвращает `true`, interstitial no-op), на Android автоматически использует нативный плагин через Capacitor.
+- **`scripts/setup-android.mjs`** — генерирует нативный Java-плагин `YandexAdsPlugin.java` и `MainActivity.java`, добавляет зависимость Yandex Mobile Ads SDK в `app/build.gradle`, патчит `AndroidManifest.xml` (orientation, fullscreen, HTTP legacy library) и `styles.xml`.
+- **`src/config.ts`** → `ADS_CONFIG` — содержит ad unit IDs. Сейчас прописаны официальные demo-IDs Яндекса для тестирования.
 
-После `npm run cap:add:android` нужно создать файл `android/app/src/main/java/com/nikasal/box2048/YandexAdsPlugin.kt` со следующей структурой:
+### Версия SDK
 
-```kotlin
-package com.nikasal.box2048
+Используется **Yandex Mobile Ads SDK 8.1.0** (последняя на момент написания).
 
-import com.getcapacitor.*
-import com.yandex.mobile.ads.common.MobileAds
-import com.yandex.mobile.ads.interstitial.InterstitialAd
-import com.yandex.mobile.ads.interstitial.InterstitialAdLoader
-import com.yandex.mobile.ads.rewarded.RewardedAd
-import com.yandex.mobile.ads.rewarded.RewardedAdLoader
+Breaking changes vs 7.x (используется в starflow):
+- `MobileAds.initialize()` → `YandexAds.initialize()` (класс переименован)
+- `AdRequestConfiguration` удалён → использовать `AdRequest.Builder(adUnitId).build()`
+- `InterstitialAdLoader` / `RewardedAdLoader` / event listeners — API без изменений
 
-@CapacitorPlugin(name = "YandexAds")
-class YandexAdsPlugin : Plugin() {
+Плагин написан на Java (не Kotlin, как предлагалось изначально в этом README), чтобы совпадать с паттерном starflow и не требовать дополнительных Kotlin-dependency настроек в Gradle.
 
-    private var interstitial: InterstitialAd? = null
-    private var rewarded: RewardedAd? = null
+### API плагина
 
-    @PluginMethod
-    fun initialize(call: PluginCall) {
-        MobileAds.initialize(context) { Log.d("YandexAds", "initialized") }
-        call.resolve()
-    }
-
-    @PluginMethod
-    fun loadInterstitial(call: PluginCall) {
-        val adId = call.getString("adId") ?: return call.reject("adId required")
-        val loader = InterstitialAdLoader(context)
-        loader.loadAd(... ) { ad, error ->
-            if (ad != null) { interstitial = ad; notifyListeners("interstitial_loaded", null) }
-        }
-        call.resolve()
-    }
-
-    @PluginMethod
-    fun showInterstitial(call: PluginCall) {
-        activity.runOnUiThread {
-            interstitial?.show(activity)
-            interstitial = null
-            call.resolve()
-        }
-    }
-
-    @PluginMethod
-    fun loadRewarded(call: PluginCall) { /* аналогично */ }
-
-    @PluginMethod
-    fun showRewarded(call: PluginCall) {
-        activity.runOnUiThread {
-            rewarded?.setRewardListener { reward ->
-                notifyListeners("rewarded_earned", JSObject().put("amount", reward.amount))
-            }
-            rewarded?.show(activity)
-            rewarded = null
-            call.resolve()
-        }
-    }
+```typescript
+// src/ads/AdsManager.ts
+interface YandexAdsPlugin {
+  initialize(): Promise<void>;
+  showRewardedAd(options: { adUnitId: string }): Promise<{ granted: boolean; error?: string }>;
+  showInterstitialAd(options: { adUnitId: string }): Promise<{ shown: boolean; error?: string }>;
 }
 ```
 
-И зарегистрировать плагин в `android/app/src/main/assets/capacitor.plugins.json`:
+В отличие от starflow (где preload был отдельным шагом), наш плагин **загружает и показывает рекламу одним вызовом** — это упрощает логику и устраняет stale-кэш загруженных ad-ов. Плагин сам управляет `RewardedAdLoader` / `InterstitialAdLoader` (singleton-экземпляры).
 
-```json
-[
-  {
-    "pkg": "com.nikasal.box2048.YandexAdsPlugin",
-    "classpath": "com.nikasal.box2048.YandexAdsPlugin"
-  }
-]
+### Стратегия показа
+
+| Событие | Формат | Частота |
+|---|---|---|
+| Game Over → экран проигрыша | **Interstitial** | не чаще раза в 90 секунд, каждые 3 смерти |
+| Кнопка «Возродиться» | **Rewarded** | по запросу игрока |
+| Milestone (32, 64, 128, ...) закрыт | **Interstitial** | с min gap 60s |
+
+### Установка
+
+```bash
+# Если ещё не добавляли Android-платформу:
+npm run cap:add:android
+# Эта команда автоматически запустит scripts/setup-android.mjs,
+# который сгенерирует YandexAdsPlugin.java, MainActivity.java и пропатчит
+# AndroidManifest.xml, styles.xml, build.gradle, variables.gradle.
+
+# Если Android-платформа уже добавлена — просто пересинхронизируйте:
+npm run cap:sync
+# (= build + cap sync + setup-android)
+
+# Сборка и установка:
+npm run android:debug
+npm run android:install
 ```
 
-### Подключение Yandex Mobile Ads SDK в Gradle
+### Тестовые ad unit IDs
 
-В `android/app/build.gradle` добавить:
+Yandex предоставляет официальные demo-юниты, которые всегда отдают тестовые креативы — нельзя «накрутить» показы:
 
-```gradle
-dependencies {
-    implementation 'com.yandex.android:mobileads:7.2.0'  // проверить последнюю версию
-}
+- `demo-interstitial-yandex` — interstitial
+- `demo-rewarded-yandex` — rewarded
+- `demo-banner-yandex` — banner
+
+Эти ID уже прописаны в `src/config.ts` → `ADS_CONFIG`. **Перед публикацией** замените их на реальные ad unit IDs из [кабинета Yandex Advertising Network](https://yandex.ru/dev/mobile-ads/).
+
+### Отладка рекламы
+
+```bash
+# Логирование в реальном времени:
+npm run android:log
+# Фильтрует logcat по тегам: Capacitor, chromium, System.out, YandexAds
+
+# Через chrome://inspect (как для обычного WebView):
+# 1. Запустите приложение на устройстве
+# 2. Откройте chrome://inspect в Chrome на ПК
+# 3. Найдите устройство в списке, нажмите Inspect
 ```
 
-В `android/build.gradle` (project-level) убедиться, что есть репозиторий Yandex:
+Логи плагина помечены тегом `YandexAds` — там видно инициализацию SDK, загрузку/показ рекламы, ошибки.
 
-```gradle
-allprojects {
-    repositories {
-        google()
-        mavenCentral()
-        maven { url "https://maven.yandex.net/repository/maven-central" }
-    }
-}
-```
+### Если реклама не показывается
 
-### Конфигурация App ID в AndroidManifest.xml
-
-Yandex Mobile Ads требует **явного объявления ad unit ID** в манифесте только для некоторых форматов. Interstitial и Rewarded загружаются динамически через `loadAd(adUnitId)`. Получить реальные ad unit ID нужно в [кабинете Yandex Advertising Network](https://yandex.ru/dev/mobile-ads/).
-
-### Тестовые ad unit ID
-
-Yandex предоставляет демо-юниты для тестирования (см. [документацию](https://yandex.ru/dev/mobile-ads/doc/dg/android/about-test-adunits.html)). Не используйте реальные ad unit ID в debug-сборке — это может привести к блокировке аккаунта за «накрутку».
+1. Проверьте логи через `npm run android:log` — ищите `YandexAds` тег
+2. Убедитесь, что `ADS_CONFIG` в `src/config.ts` содержит корректные ad unit IDs (для теста — `demo-interstitial-yandex`)
+3. Проверьте, что в `android/app/build.gradle` есть `implementation 'com.yandex.android:mobileads:8.1.0'` (скрипт добавляет автоматически)
+4. Убедитесь, что есть интернет на устройстве
+5. Demo-юниты иногда могут возвращать `no fill` — это нормально для теста
 
 ## Release signing
 

@@ -8,19 +8,14 @@ const config: CapacitorConfig = {
   android: {
     allowMixedContent: false,
     captureInput: true,
-    webContentsDebuggingEnabled: false
-  },
-  plugins: {
-    // YandexAds plugin configuration will be added here
-    // after the native plugin is implemented in android/ module.
-    YandexAds: {
-      // Use test ad unit IDs during development.
-      // Replace with production IDs before release.
-      interstitialAdId: 'demo-interstitial',
-      rewardedAdId: 'demo-rewarded',
-      bannerAdId: 'demo-banner'
-    }
+    // Enable WebView debugging in debug builds so chrome://inspect works.
+    // Automatically false in release builds — Capacitor strips this in prod.
+    webContentsDebuggingEnabled: true
   }
+  // NOTE: Yandex Ads configuration lives in src/config.ts (ADS_CONFIG) and
+  // is consumed by src/ads/AdsManager.ts. The native plugin is generated
+  // by scripts/setup-android.mjs into android/app/src/main/java/...
+  // and registered in MainActivity.java — no entry needed here.
 };
 
 export default config;
