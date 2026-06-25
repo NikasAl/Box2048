@@ -75,10 +75,22 @@ class AdsManager {
   async maybeShowInterstitialOnDeath(totalDeaths: number): Promise<void> {
     if (!Capacitor.isNativePlatform()) return;
     if (totalDeaths % ADS_CONFIG.interstitialEveryDeaths !== 0) return;
+    await this.showInterstitialInternal();
+  }
+
+  /**
+   * Show an interstitial after a milestone dialog is dismissed.
+   * Subject only to the minimum-gap rule.
+   */
+  async maybeShowInterstitialOnMilestone(): Promise<void> {
+    if (!Capacitor.isNativePlatform()) return;
+    await this.showInterstitialInternal();
+  }
+
+  private async showInterstitialInternal(): Promise<void> {
     const now = Date.now();
     if (now - this.lastInterstitialShownAt < ADS_CONFIG.interstitialMinGapMs) return;
     if (!this.interstitialLoaded) {
-      // Try to reload and skip this time.
       YandexAds.loadInterstitial({ adId: ADS_CONFIG.interstitialAdId }).catch(
         () => {}
       );
@@ -88,7 +100,6 @@ class AdsManager {
       await YandexAds.showInterstitial();
       this.lastInterstitialShownAt = Date.now();
       this.interstitialLoaded = false;
-      // Preload the next one.
       YandexAds.loadInterstitial({ adId: ADS_CONFIG.interstitialAdId })
         .then(() => (this.interstitialLoaded = true))
         .catch(() => {});

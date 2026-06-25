@@ -6,6 +6,7 @@
 import Phaser from 'phaser';
 import { COLORS, STORAGE_KEYS } from '../config';
 import { AdsManager } from '../ads/AdsManager';
+import { i18n } from '../systems/I18n';
 
 interface GameOverData {
   score: number;
@@ -32,7 +33,7 @@ export class GameOverScene extends Phaser.Scene {
 
     // Title
     this.add
-      .text(width / 2, height * 0.25, 'GAME OVER', {
+      .text(width / 2, height * 0.25, i18n.t('gameover.title'), {
         fontFamily: 'Arial Black, Arial, sans-serif',
         fontSize: '52px',
         color: '#e94560'
@@ -41,7 +42,7 @@ export class GameOverScene extends Phaser.Scene {
 
     // Score
     this.add
-      .text(width / 2, height * 0.4, 'Score', {
+      .text(width / 2, height * 0.4, i18n.t('gameover.score'), {
         fontFamily: 'Arial, sans-serif',
         fontSize: '18px',
         color: '#8a8aa8'
@@ -57,16 +58,21 @@ export class GameOverScene extends Phaser.Scene {
 
     // Best
     this.add
-      .text(width / 2, height * 0.54, `Best: ${this.gameOverData.best}`, {
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '22px',
-        color: '#e94560'
-      })
+      .text(
+        width / 2,
+        height * 0.54,
+        i18n.t('gameover.best', { score: this.gameOverData.best }),
+        {
+          fontFamily: 'Arial, sans-serif',
+          fontSize: '22px',
+          color: '#e94560'
+        }
+      )
       .setOrigin(0.5);
 
     if (this.gameOverData.isRecord) {
       this.add
-        .text(width / 2, height * 0.6, 'NEW RECORD!', {
+        .text(width / 2, height * 0.6, i18n.t('gameover.newRecord'), {
           fontFamily: 'Arial Black, Arial, sans-serif',
           fontSize: '24px',
           color: '#edc850'
@@ -78,7 +84,7 @@ export class GameOverScene extends Phaser.Scene {
     const reviveBtn = this.makeButton(
       width / 2,
       height * 0.72,
-      'REVIVE (ad)',
+      i18n.t('gameover.revive'),
       0x0f3460,
       async () => {
         reviveBtn.disable();
@@ -86,11 +92,8 @@ export class GameOverScene extends Phaser.Scene {
           .showRewarded()
           .catch(() => false);
         if (ok) {
-          // For the prototype we just restart — a real "revive" should
-          // clear top cubes via an event. Hook to implement later.
           this.scene.start('GameScene');
         } else {
-          // Reward not granted — re-enable the button.
           reviveBtn.enable();
         }
       }
@@ -100,7 +103,7 @@ export class GameOverScene extends Phaser.Scene {
     this.makeButton(
       width / 2,
       height * 0.84,
-      'PLAY AGAIN',
+      i18n.t('gameover.playAgain'),
       COLORS.buttonPrimary,
       () => {
         this.scene.start('GameScene');
@@ -109,7 +112,7 @@ export class GameOverScene extends Phaser.Scene {
 
     // Menu
     this.add
-      .text(width / 2, height - 40, '← Main menu', {
+      .text(width / 2, height - 40, i18n.t('gameover.menu'), {
         fontFamily: 'Arial, sans-serif',
         fontSize: '16px',
         color: '#8a8aa8'

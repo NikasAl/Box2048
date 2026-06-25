@@ -61,7 +61,13 @@ export const LAUNCH_SPEED = 9; // px per physics tick (Matter scales internally)
 export const LAUNCH_MAX_SPEED = 14;
 
 // Cooldown before the next cube spawns after a launch.
-export const NEXT_CUBE_DELAY_MS = 600;
+// Lower = faster gameplay (player can spam-tap).
+export const NEXT_CUBE_DELAY_MS = 200;
+
+// "Lock-in" delay: after launching, the launched cube is the "current" cube
+// for this many ms before a new floating cube spawns. If the player taps
+// again before this elapses, the tap is queued (we'll handle that below).
+export const TAP_QUEUE_WINDOW_MS = 180;
 
 // The spawnable cube values (powers of two).
 // Larger cubes only appear as the result of merges.
@@ -116,8 +122,28 @@ export const ADS_CONFIG = {
   interstitialMinGapMs: 60_000
 };
 
+// Milestone values: when a cube of this value is created via merge for the
+// first time in this playthrough, show a congratulation dialog.
+// (After the dialog closes, AdsManager.maybeShowInterstitialOnMilestone is called.)
+export const MILESTONE_VALUES: number[] = [32, 64, 128, 256, 512, 1024, 2048];
+
+// Shockwave applied to nearby cubes when a merge happens.
+// - radius: how far the wave reaches (in pixels)
+// - strength: max impulse applied at the epicenter; falls off with distance
+// - uplift: extra upward component so cubes "jump" a bit
+export const SHOCKWAVE = {
+  radius: 180,
+  strength: 6,
+  uplift: 2
+};
+
 // Local storage keys.
 export const STORAGE_KEYS = {
   bestScore: 'box2048_best_score',
-  totalDeaths: 'box2048_total_deaths'
+  totalDeaths: 'box2048_total_deaths',
+  language: 'box2048_language'
 };
+
+// Supported languages. 'ru' is the default for the project's target audience.
+export const DEFAULT_LANGUAGE: 'ru' | 'en' = 'ru';
+export const SUPPORTED_LANGUAGES: Array<'ru' | 'en'> = ['ru', 'en'];

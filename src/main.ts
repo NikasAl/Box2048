@@ -9,6 +9,7 @@ import { PreloadScene } from './scenes/PreloadScene';
 import { MenuScene } from './scenes/MenuScene';
 import { GameScene } from './scenes/GameScene';
 import { GameOverScene } from './scenes/GameOverScene';
+import { MilestoneScene } from './scenes/MilestoneScene';
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
@@ -44,7 +45,7 @@ const config: Phaser.Types.Core.GameConfig = {
     antialias: true,
     roundPixels: true
   },
-  scene: [BootScene, PreloadScene, MenuScene, GameScene, GameOverScene]
+  scene: [BootScene, PreloadScene, MenuScene, GameScene, GameOverScene, MilestoneScene]
 };
 
 // Remove the loading indicator once Phaser has booted.

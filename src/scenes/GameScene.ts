@@ -29,16 +29,20 @@ import {
   COLORS,
   STORAGE_KEYS,
   NEXT_CUBE_DELAY_MS,
+  TAP_QUEUE_WINDOW_MS,
   LAUNCH_SPEED,
   LAUNCH_MAX_SPEED,
-  WALL_PHYSICS
+  WALL_PHYSICS,
+  MILESTONE_VALUES
 } from '../config';
 import { Cube } from '../objects/Cube';
 import { Spawner } from '../objects/Spawner';
 import { MergeSystem } from '../systems/MergeSystem';
 import { ScoreSystem } from '../systems/ScoreSystem';
 import { GameOverDetector } from '../systems/GameOverDetector';
+import { ShockWaveSystem } from '../systems/ShockWaveSystem';
 import { AdsManager } from '../ads/AdsManager';
+import { i18n } from '../systems/I18n';
 
 export class GameScene extends Phaser.Scene {
   // World bounds (as Matter static walls)
@@ -55,6 +59,20 @@ export class GameScene extends Phaser.Scene {
   private mergeSystem!: MergeSystem;
   private scoreSystem!: ScoreSystem;
   private gameOverDetector!: GameOverDetector;
+  private shockWaveSystem!: ShockWaveSystem;
+
+  // Milestone tracking: which cube values have been reached in this playthrough.
+  // When a merge produces a value in MILESTONE_VALUES that we haven't seen
+  // yet this game, we show the MilestoneScene overlay.
+  private reachedMilestones: Set<number> = new Set();
+
+  // Whether the MilestoneScene overlay is currently showing (pauses the game).
+  private milestoneOverlayActive: boolean = false;
+
+  // Queued tap: if the player taps while a cube is still launching (within
+  // TAP_QUEUE_WINDOW_MS), we remember the target and apply it as soon as the
+  // next cube spawns. This is what makes rapid-fire tapping feel responsive.
+  private queuedTap: { x: number; y: number; t: number } | null = null;
 
   // UI
   private scoreText!: Phaser.GameObjects.Text;
@@ -90,6 +108,12 @@ export class GameScene extends Phaser.Scene {
     this.scoreSystem = new ScoreSystem();
     this.scoreSystem.onScoreChanged((s) => this.updateScoreUI(s.score, s.best));
     this.gameOverDetector = new GameOverDetector(this, this);
+    this.shockWaveSystem = new ShockWaveSystem(this);
+
+    // Reset milestone tracking at the start of each playthrough.
+    this.reachedMilestones.clear();
+    this.milestoneOverlayActive = false;
+    this.queuedTap = null;
 
     // Input
     this.input.on('pointerdown', this.handlePointerDown, this);
@@ -103,16 +127,16 @@ export class GameScene extends Phaser.Scene {
 
   update(_time: number, deltaMs: number): void {
     const delta = deltaMs / 1000;
-    this.gameOverDetector.update(delta);
+    if (!this.milestoneOverlayActive) {
+      this.gameOverDetector.update(delta);
+    }
     this.updateDangerLinePulse(delta);
 
     // Keep the current (un-launched) cube floating at the top.
     if (this.currentCube && this.currentCube.isFloating()) {
-      // Hover above spawn point, gently bobbing vertically.
-      // We don't force angle=0 — instead we let it wobble slightly to feel alive.
       const t = this.time.now / 400;
       const bob = Math.sin(t) * 4;
-      const wobble = Math.sin(t * 0.7) * 4; // small angle wobble in degrees
+      const wobble = Math.sin(t * 0.7) * 4;
       this.currentCube.setPosition(SPAWN_X, SPAWN_Y + bob);
       this.currentCube.setAngle(wobble);
     }
@@ -175,7 +199,7 @@ export class GameScene extends Phaser.Scene {
 
   private drawUI(): void {
     // Score panel at top
-    this.add.text(20, 20, 'SCORE', {
+    this.add.text(20, 20, i18n.t('game.score'), {
       fontFamily: 'Arial, sans-serif',
       fontSize: '14px',
       color: '#8a8aa8'
@@ -186,7 +210,7 @@ export class GameScene extends Phaser.Scene {
       color: '#ffffff'
     });
 
-    this.add.text(GAME_WIDTH - 20, 20, 'BEST', {
+    this.add.text(GAME_WIDTH - 20, 20, i18n.t('game.best'), {
       fontFamily: 'Arial, sans-serif',
       fontSize: '14px',
       color: '#8a8aa8'
@@ -199,7 +223,7 @@ export class GameScene extends Phaser.Scene {
     }).setOrigin(1, 0);
 
     // "Next" preview
-    this.add.text(GAME_WIDTH / 2, 30, 'NEXT', {
+    this.add.text(GAME_WIDTH / 2, 30, i18n.t('game.next'), {
       fontFamily: 'Arial, sans-serif',
       fontSize: '12px',
       color: '#8a8aa8'
@@ -265,14 +289,25 @@ export class GameScene extends Phaser.Scene {
   }
 
   private handlePointerDown(pointer: Phaser.Input.Pointer): void {
-    if (!this.canLaunch) return;
-    if (!this.currentCube) return;
-    if (this.currentCube.isLaunched()) return;
+    // Ignore taps while the milestone overlay is up — the overlay handles its own input.
+    if (this.milestoneOverlayActive) return;
 
     // Restrict target to within the playfield horizontally.
     const targetX = Phaser.Math.Clamp(pointer.x, FIELD_LEFT + 20, FIELD_RIGHT - 20);
     const targetY = Phaser.Math.Clamp(pointer.y, FIELD_TOP, FIELD_BOTTOM);
 
+    if (this.canLaunch && this.currentCube && !this.currentCube.isLaunched()) {
+      this.launchCurrentCube(targetX, targetY);
+      return;
+    }
+
+    // Otherwise, queue the tap if the player tapped within the queue window.
+    // This lets players spam-tap: each tap launches a cube as soon as one is ready.
+    this.queuedTap = { x: targetX, y: targetY, t: this.time.now };
+  }
+
+  private launchCurrentCube(targetX: number, targetY: number): void {
+    if (!this.currentCube) return;
     const cube = this.currentCube;
     const dx = targetX - cube.x;
     const dy = targetY - cube.y;
@@ -281,15 +316,25 @@ export class GameScene extends Phaser.Scene {
     const vx = (dx / dist) * speed;
     const vy = (dy / dist) * speed;
 
-    // Convert the floating cube into a physics body.
     cube.launch(vx, vy);
 
     // Cooldown before next cube appears.
     this.canLaunch = false;
     this.time.delayedCall(NEXT_CUBE_DELAY_MS, () => {
+      if (this.gameOverDetector.isGameOver()) return;
       this.canLaunch = true;
-      if (this.scene.isActive() && !this.gameOverDetector.isGameOver()) {
-        this.spawnNext();
+      this.spawnNext();
+      // After spawning, check if there's a queued tap to apply immediately.
+      if (this.queuedTap) {
+        const age = this.time.now - this.queuedTap.t;
+        if (age < TAP_QUEUE_WINDOW_MS + NEXT_CUBE_DELAY_MS) {
+          const q = this.queuedTap;
+          this.queuedTap = null;
+          // Launch on next frame to ensure the cube is fully spawned.
+          this.time.delayedCall(0, () => this.launchCurrentCube(q.x, q.y));
+        } else {
+          this.queuedTap = null;
+        }
       }
     });
   }
@@ -301,10 +346,35 @@ export class GameScene extends Phaser.Scene {
   private onMerge(e: { newValue: number; x: number; y: number }): void {
     // Score: the merged cube's value (so 4+4=8 gives +8).
     this.scoreSystem.addScore(e.newValue);
+    // Shockwave pushes nearby cubes outward from the merge epicenter.
+    this.shockWaveSystem.trigger(e.x, e.y, e.newValue);
     // Particle burst
     this.spawnMergeParticles(e.x, e.y, e.newValue);
     // Sound (placeholder — no asset; uses WebAudio beep)
     this.playMergeSound(e.newValue);
+    // Milestone check: if this is a new high-value cube for this playthrough,
+    // show the congratulation overlay.
+    if (MILESTONE_VALUES.includes(e.newValue) && !this.reachedMilestones.has(e.newValue)) {
+      this.reachedMilestones.add(e.newValue);
+      this.showMilestone(e.newValue);
+    }
+  }
+
+  private showMilestone(value: number): void {
+    this.milestoneOverlayActive = true;
+    // Launch the overlay scene on top of this one. It will pause this scene
+    // and resume it when dismissed.
+    this.scene.launch('MilestoneScene', { value });
+    this.scene.pause();
+  }
+
+  /**
+   * Called by MilestoneScene when the user dismisses the dialog.
+   * (We expose this via scene events so MilestoneScene doesn't need to import GameScene.)
+   */
+  resumeFromMilestone(): void {
+    this.milestoneOverlayActive = false;
+    this.scene.resume();
   }
 
   private spawnMergeParticles(x: number, y: number, value: number): void {
