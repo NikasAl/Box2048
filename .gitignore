@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Build output
+dist/
+dist-ssr/
+*.local
+
+# Capacitor native build artifacts
+android/
+ios/
+
+# IDE / Editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+logs/
+*.log
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Keys and credentials
+*.keystore
+*.jks
+keystore.properties
+google-services.json
+agconnect-services.json
+secrets.properties
+
+# OS
+Thumbs.db

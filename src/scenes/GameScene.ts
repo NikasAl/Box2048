@@ -1,0 +1,420 @@
+/**
+ * GameScene: the core gameplay loop.
+ *
+ * Flow:
+ *   1. A cube spawns at the top center.
+ *   2. Player taps anywhere on the field — the cube is thrown toward that point
+ *      with an initial velocity, then gravity takes over (parabolic motion).
+ *   3. If the cube collides with another cube of the SAME value, they merge
+ *      into a new cube of double the value, placed at the collision midpoint.
+ *   4. If any cube stays above the danger line for too long, game over.
+ *   5. After a short cooldown, the next cube spawns.
+ */
+
+import Phaser from 'phaser';
+import {
+  GAME_WIDTH,
+  GAME_HEIGHT,
+  FIELD_LEFT,
+  FIELD_RIGHT,
+  FIELD_TOP,
+  FIELD_BOTTOM,
+  DANGER_LINE_Y,
+  DANGER_GRACE_MS,
+  SPAWN_X,
+  SPAWN_Y,
+  SPAWN_VALUES,
+  SPAWN_WEIGHTS,
+  MAX_CUBE_VALUE,
+  COLORS,
+  STORAGE_KEYS,
+  NEXT_CUBE_DELAY_MS,
+  LAUNCH_SPEED,
+  LAUNCH_MAX_SPEED
+} from '../config';
+import { Cube } from '../objects/Cube';
+import { Spawner } from '../objects/Spawner';
+import { MergeSystem } from '../systems/MergeSystem';
+import { ScoreSystem } from '../systems/ScoreSystem';
+import { GameOverDetector } from '../systems/GameOverDetector';
+import { AdsManager } from '../ads/AdsManager';
+
+export class GameScene extends Phaser.Scene {
+  // World bounds (as Matter static walls)
+  private walls: MatterJS.BodyType[] = [];
+
+  // Current cube being aimed / thrown, before physics takes over.
+  // When null, we are waiting for NEXT_CUBE_DELAY_MS before spawning the next.
+  private currentCube: Cube | null = null;
+
+  // Set of all live cubes in the world (including currentCube after launch).
+  public cubes: Set<Cube> = new Set();
+
+  private spawner!: Spawner;
+  private mergeSystem!: MergeSystem;
+  private scoreSystem!: ScoreSystem;
+  private gameOverDetector!: GameOverDetector;
+
+  // UI
+  private scoreText!: Phaser.GameObjects.Text;
+  private bestText!: Phaser.GameObjects.Text;
+  private nextCubeText!: Phaser.GameObjects.Text;
+  private dangerLine!: Phaser.GameObjects.Line;
+  private dangerFlash: number = 0; // 0..1 intensity
+
+  // Track the next value to spawn, so we can preview it.
+  private nextValue: number = 2;
+
+  // Whether the player can launch the current cube.
+  private canLaunch: boolean = true;
+
+  constructor() {
+    super({ key: 'GameScene' });
+  }
+
+  create(): void {
+    this.cameras.main.setBackgroundColor(COLORS.background);
+    this.drawField();
+    this.drawDangerLine();
+    this.drawUI();
+
+    // Reset state
+    this.cubes.clear();
+    this.canLaunch = true;
+    this.nextValue = this.pickSpawnValue();
+
+    // Systems
+    this.spawner = new Spawner(this);
+    this.mergeSystem = new MergeSystem(this);
+    this.scoreSystem = new ScoreSystem();
+    this.scoreSystem.onScoreChanged((s) => this.updateScoreUI(s.score, s.best));
+    this.gameOverDetector = new GameOverDetector(this, this);
+
+    // Input
+    this.input.on('pointerdown', this.handlePointerDown, this);
+
+    // Listen for merge events to spawn particles + sound.
+    this.mergeSystem.onMerge((e) => this.onMerge(e));
+
+    // Spawn the first cube.
+    this.spawnNext();
+  }
+
+  update(_time: number, deltaMs: number): void {
+    const delta = deltaMs / 1000;
+    this.gameOverDetector.update(delta);
+    this.updateDangerLinePulse(delta);
+
+    // Keep the current (un-launched) cube floating at the top.
+    if (this.currentCube && this.currentCube.isFloating()) {
+      // Hover above spawn point, gently bobbing.
+      const bob = Math.sin(this.time.now / 400) * 4;
+      this.currentCube.setPosition(SPAWN_X, SPAWN_Y + bob);
+      // Cancel any rotation for visual cleanliness while aiming.
+      this.currentCube.setAngle(0);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Field & UI
+  // -------------------------------------------------------------------------
+
+  private drawField(): void {
+    // Playfield background
+    const g = this.add.graphics();
+    g.fillStyle(COLORS.field, 1);
+    g.fillRect(FIELD_LEFT, FIELD_TOP, FIELD_RIGHT - FIELD_LEFT, FIELD_BOTTOM - FIELD_TOP);
+    g.lineStyle(3, COLORS.fieldBorder, 1);
+    g.strokeRect(FIELD_LEFT, FIELD_TOP, FIELD_RIGHT - FIELD_LEFT, FIELD_BOTTOM - FIELD_TOP);
+
+    // Solid static walls: left, right, bottom. The top is open (cubes spawn there).
+    const wallThickness = 60;
+    const wallOptions = { isStatic: true, friction: 0.4, restitution: 0.1 };
+    const wallY = FIELD_BOTTOM + wallThickness / 2;
+    const bottomWall = this.matter.add.rectangle(
+      (FIELD_LEFT + FIELD_RIGHT) / 2,
+      wallY,
+      FIELD_RIGHT - FIELD_LEFT + wallThickness * 2,
+      wallThickness,
+      wallOptions
+    );
+    const leftWall = this.matter.add.rectangle(
+      FIELD_LEFT - wallThickness / 2,
+      (FIELD_TOP + FIELD_BOTTOM) / 2,
+      wallThickness,
+      FIELD_BOTTOM - FIELD_TOP + wallThickness * 2,
+      wallOptions
+    );
+    const rightWall = this.matter.add.rectangle(
+      FIELD_RIGHT + wallThickness / 2,
+      (FIELD_TOP + FIELD_BOTTOM) / 2,
+      wallThickness,
+      FIELD_BOTTOM - FIELD_TOP + wallThickness * 2,
+      wallOptions
+    );
+    this.walls = [bottomWall, leftWall, rightWall];
+  }
+
+  private drawDangerLine(): void {
+    this.dangerLine = this.add.line(
+      0,
+      0,
+      FIELD_LEFT,
+      DANGER_LINE_Y,
+      FIELD_RIGHT,
+      DANGER_LINE_Y,
+      COLORS.dangerLine,
+      2
+    );
+    this.dangerLine.setOrigin(0, 0);
+    this.dangerLine.setAlpha(0.5);
+  }
+
+  private drawUI(): void {
+    // Score panel at top
+    this.add.text(20, 20, 'SCORE', {
+      fontFamily: 'Arial, sans-serif',
+      fontSize: '14px',
+      color: '#8a8aa8'
+    });
+    this.scoreText = this.add.text(20, 38, '0', {
+      fontFamily: 'Arial Black, Arial, sans-serif',
+      fontSize: '32px',
+      color: '#ffffff'
+    });
+
+    this.add.text(GAME_WIDTH - 20, 20, 'BEST', {
+      fontFamily: 'Arial, sans-serif',
+      fontSize: '14px',
+      color: '#8a8aa8'
+    }).setOrigin(1, 0);
+    const best = Number(localStorage.getItem(STORAGE_KEYS.bestScore) ?? 0);
+    this.bestText = this.add.text(GAME_WIDTH - 20, 38, String(best), {
+      fontFamily: 'Arial Black, Arial, sans-serif',
+      fontSize: '32px',
+      color: '#e94560'
+    }).setOrigin(1, 0);
+
+    // "Next" preview
+    this.add.text(GAME_WIDTH / 2, 30, 'NEXT', {
+      fontFamily: 'Arial, sans-serif',
+      fontSize: '12px',
+      color: '#8a8aa8'
+    }).setOrigin(0.5);
+    this.nextCubeText = this.add.text(GAME_WIDTH / 2, 56, '2', {
+      fontFamily: 'Arial Black, Arial, sans-serif',
+      fontSize: '24px',
+      color: '#ffffff'
+    }).setOrigin(0.5);
+
+    this.updateScoreUI(0, best);
+  }
+
+  private updateScoreUI(score: number, best: number): void {
+    this.scoreText.setText(String(score));
+    this.bestText.setText(String(best));
+  }
+
+  private updateNextUI(): void {
+    this.nextCubeText.setText(String(this.nextValue));
+  }
+
+  private updateDangerLinePulse(delta: number): void {
+    // If any cube is currently above the danger line, pulse the line red.
+    let dangerActive = false;
+    for (const cube of this.cubes) {
+      if (cube.y < DANGER_LINE_Y && !cube.isFloating()) {
+        dangerActive = true;
+        break;
+      }
+    }
+    if (dangerActive) {
+      this.dangerFlash = Math.min(1, this.dangerFlash + delta * 2);
+    } else {
+      this.dangerFlash = Math.max(0, this.dangerFlash - delta * 2);
+    }
+    this.dangerLine.setAlpha(0.4 + this.dangerFlash * 0.6);
+    this.dangerLine.setLineWidth(2 + this.dangerFlash * 3);
+  }
+
+  // -------------------------------------------------------------------------
+  // Spawning & input
+  // -------------------------------------------------------------------------
+
+  private pickSpawnValue(): number {
+    const totalWeight = SPAWN_WEIGHTS.reduce((a, b) => a + b, 0);
+    let r = Math.random() * totalWeight;
+    for (let i = 0; i < SPAWN_VALUES.length; i++) {
+      r -= SPAWN_WEIGHTS[i];
+      if (r <= 0) return SPAWN_VALUES[i];
+    }
+    return SPAWN_VALUES[0];
+  }
+
+  private spawnNext(): void {
+    if (!this.canLaunch) return;
+    const value = this.nextValue;
+    this.currentCube = this.spawner.spawnFloating(value);
+    this.cubes.add(this.currentCube);
+    // Pre-pick the NEXT next value for the preview.
+    this.nextValue = this.pickSpawnValue();
+    this.updateNextUI();
+  }
+
+  private handlePointerDown(pointer: Phaser.Input.Pointer): void {
+    if (!this.canLaunch) return;
+    if (!this.currentCube) return;
+    if (this.currentCube.isLaunched()) return;
+
+    // Restrict target to within the playfield horizontally.
+    const targetX = Phaser.Math.Clamp(pointer.x, FIELD_LEFT + 20, FIELD_RIGHT - 20);
+    const targetY = Phaser.Math.Clamp(pointer.y, FIELD_TOP, FIELD_BOTTOM);
+
+    const cube = this.currentCube;
+    const dx = targetX - cube.x;
+    const dy = targetY - cube.y;
+    const dist = Math.max(1, Math.hypot(dx, dy));
+    const speed = Math.min(LAUNCH_MAX_SPEED, LAUNCH_SPEED);
+    const vx = (dx / dist) * speed;
+    const vy = (dy / dist) * speed;
+
+    // Convert the floating cube into a physics body.
+    cube.launch(vx, vy);
+
+    // Cooldown before next cube appears.
+    this.canLaunch = false;
+    this.time.delayedCall(NEXT_CUBE_DELAY_MS, () => {
+      this.canLaunch = true;
+      if (this.scene.isActive() && !this.gameOverDetector.isGameOver()) {
+        this.spawnNext();
+      }
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Merge events
+  // -------------------------------------------------------------------------
+
+  private onMerge(e: { newValue: number; x: number; y: number }): void {
+    // Score: the merged cube's value (so 4+4=8 gives +8).
+    this.scoreSystem.addScore(e.newValue);
+    // Particle burst
+    this.spawnMergeParticles(e.x, e.y, e.newValue);
+    // Sound (placeholder — no asset; uses WebAudio beep)
+    this.playMergeSound(e.newValue);
+  }
+
+  private spawnMergeParticles(x: number, y: number, value: number): void {
+    const color = Phaser.Display.Color.IntegerToColor(
+      this.lookupCubeColor(value)
+    );
+    const emitter = this.add.particles(x, y, 'particle', {
+      lifespan: 600,
+      speed: { min: 80, max: 220 },
+      scale: { start: 0.8, end: 0 },
+      quantity: 14,
+      tint: color.color,
+      emitting: false
+    });
+    emitter.explode(14, x, y);
+    this.time.delayedCall(700, () => emitter.destroy());
+  }
+
+  private lookupCubeColor(value: number): number {
+    const styles = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048];
+    const found = styles.find((v) => v === value);
+    if (found === undefined) return 0xffffff;
+    // Mirror config.ts palette.
+    const palette: Record<number, number> = {
+      2: 0xeee4da,
+      4: 0xede0c8,
+      8: 0xf2b179,
+      16: 0xf59563,
+      32: 0xf67c5f,
+      64: 0xf65e3b,
+      128: 0xedcf72,
+      256: 0xedcc61,
+      512: 0xedc850,
+      1024: 0xedc53f,
+      2048: 0xedc22e
+    };
+    return palette[found] ?? 0xffffff;
+  }
+
+  private playMergeSound(value: number): void {
+    // Minimal WebAudio "pop" — pitch rises with cube value.
+    try {
+      const AudioCtx =
+        window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = AudioCtx ? new AudioCtx() : null;
+      if (!ctx) return;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const baseFreq = 220;
+      const semitones = Math.log2(value);
+      osc.frequency.value = baseFreq * Math.pow(2, semitones / 12);
+      osc.type = 'triangle';
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.25);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.26);
+      osc.onended = () => ctx.close();
+    } catch {
+      /* sound is non-critical */
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Game over
+  // -------------------------------------------------------------------------
+
+  triggerGameOver(): void {
+    if (this.gameOverDetector.isGameOver()) return;
+    this.gameOverDetector.markGameOver();
+
+    const score = this.scoreSystem.getScore();
+    const best = this.scoreSystem.getBest();
+    const isRecord = score >= best && score > 0;
+
+    // Persist death count for ad frequency control.
+    const totalDeaths =
+      Number(localStorage.getItem(STORAGE_KEYS.totalDeaths) ?? 0) + 1;
+    localStorage.setItem(STORAGE_KEYS.totalDeaths, String(totalDeaths));
+
+    // Try to show an interstitial (every N deaths, with min gap).
+    AdsManager.getInstance()
+      .maybeShowInterstitialOnDeath(totalDeaths)
+      .catch(() => {});
+
+    this.scene.start('GameOverScene', { score, best, isRecord });
+  }
+
+  // -------------------------------------------------------------------------
+  // Cube registry (called by MergeSystem / Cube itself)
+  // -------------------------------------------------------------------------
+
+  registerCube(cube: Cube): void {
+    this.cubes.add(cube);
+  }
+
+  unregisterCube(cube: Cube): void {
+    this.cubes.delete(cube);
+  }
+
+  getCubes(): Cube[] {
+    return Array.from(this.cubes);
+  }
+
+  /**
+   * Convenience for the merge system: spawn a new cube at a position.
+   */
+  spawnMergedCube(value: number, x: number, y: number, vx: number, vy: number): Cube {
+    const cube = new Cube(this, x, y, value, false);
+    cube.setVelocity(vx, vy);
+    this.cubes.add(cube);
+    return cube;
+  }
+}

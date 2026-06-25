@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#1a1a2e" />
+    <title>Box2048</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        background: #1a1a2e;
+        overflow: hidden;
+        font-family: 'Segoe UI', 'Roboto', system-ui, sans-serif;
+        -webkit-tap-highlight-color: transparent;
+        -webkit-user-select: none;
+        user-select: none;
+        touch-action: none;
+        overscroll-behavior: none;
+      }
+      #game {
+        width: 100vw;
+        height: 100vh;
+        height: 100dvh;
+      }
+      #loading {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: #ffffff;
+        font-size: 18px;
+        opacity: 0.6;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="game"></div>
+    <div id="loading">Loading Box2048…</div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
