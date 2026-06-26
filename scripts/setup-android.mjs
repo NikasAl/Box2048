@@ -573,17 +573,32 @@ public class YandexAdsPlugin extends Plugin {
                 hideBannerView();
 
                 bannerAdView = new BannerAdView(activity);
-                bannerAdView.setAdUnitId(adUnitId);
 
-                // Adaptive sticky size — fills the screen width.
-                // Convert screen px width to dp and pass to stickySize().
+                // SDK 8.1.0 API (verified by inspecting the AAR directly):
+                //   - BannerAdView has NO setAdUnitId() method.
+                //     The ad unit id is passed via AdRequest.Builder(adUnitId).
+                //   - BannerAdView.setAdSize(BannerAdSize) exists.
+                //   - BannerAdSize.stickySize() does NOT exist in Java —
+                //     it's a Kotlin-only name. The @JvmStatic method is
+                //     named BannerAdSize.sticky(Context, int).
+                //   - The official docs use Kotlin examples where
+                //     stickySize is a top-level function; the Java
+                //     equivalent is the static method BannerAdSize.sticky().
                 android.util.DisplayMetrics dm = activity.getResources().getDisplayMetrics();
                 int screenWidthDp = Math.round(dm.widthPixels / dm.density);
-                BannerAdSize adSize = BannerAdSize.stickySize(activity, screenWidthDp);
+                BannerAdSize adSize = BannerAdSize.sticky(activity, screenWidthDp);
                 bannerAdView.setAdSize(adSize);
 
                 // SDK 8.x: setBannerAdEventListener (NOT setAdEventListener).
-                // The listener is required for ad load/fail callbacks.
+                // The listener interface in 8.1.0 has exactly 4 methods
+                // (verified by inspecting the AAR):
+                //   onAdLoaded()
+                //   onAdFailedToLoad(@NotNull AdRequestError)
+                //   onAdClicked()
+                //   onImpression(@Nullable ImpressionData)
+                // The official docs show 6 methods (with onLeftApplication
+                // and onReturnedToApplication), but those don't exist in
+                // the 8.1.0 AAR — they were removed in 8.x.
                 bannerAdView.setBannerAdEventListener(new BannerAdEventListener() {
                     @Override
                     public void onAdLoaded() {
@@ -599,12 +614,6 @@ public class YandexAdsPlugin extends Plugin {
                     public void onAdClicked() {
                         android.util.Log.i("YandexAds", "Banner clicked");
                     }
-
-                    @Override
-                    public void onLeftApplication() {}
-
-                    @Override
-                    public void onReturnedToApplication() {}
 
                     @Override
                     public void onImpression(@Nullable ImpressionData impressionData) {
