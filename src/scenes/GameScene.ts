@@ -371,15 +371,47 @@ export class GameScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     // Tilt toggle button — bottom-right corner, above the banner ad area.
-    // Tapping toggles tilt control on/off. Long-press (not implemented) would
-    // recalibrate; for now, toggling off+on serves as recalibration.
+    // Tapping toggles tilt control on/off.
+    // Long-press (600ms) triggers recalibration — useful when the player
+    // shifts position and wants a new "neutral" baseline.
     this.tiltButton = this.add.text(GAME_WIDTH - 16, 90, this.getTiltButtonLabel(), {
       fontFamily: 'Arial, sans-serif',
       fontSize: '14px',
       color: '#8a8aa8'
     }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
 
+    // Long-press detection — track pointer-down time and fire recalibration
+    // if the button is held for >600ms.
+    let longPressFired = false;
+    let longPressTimer: Phaser.Time.TimerEvent | null = null;
+
+    this.tiltButton.on('pointerdown', () => {
+      longPressFired = false;
+      // Schedule the long-press callback. If the player releases before
+      // 600ms, the timer is cancelled and a normal toggle fires instead.
+      longPressTimer = this.time.delayedCall(600, () => {
+        longPressFired = true;
+        if (TiltController.isEnabled()) {
+          TiltController.recalibrate();
+          // Briefly flash the button to confirm recalibration.
+          this.tiltButton.setColor('#edc850');
+          this.time.delayedCall(400, () => {
+            this.tiltButton.setColor('#e94560');
+          });
+        }
+      });
+    });
+
     this.tiltButton.on('pointerup', async () => {
+      // Cancel pending long-press if it hasn't fired yet.
+      if (longPressTimer) {
+        longPressTimer.remove();
+        longPressTimer = null;
+      }
+      // If the long-press already fired, don't also toggle.
+      if (longPressFired) return;
+
+      // Normal tap — toggle tilt on/off.
       if (TiltController.isEnabled()) {
         TiltController.disable();
         this.tiltButton.setText(this.getTiltButtonLabel());
@@ -398,6 +430,14 @@ export class GameScene extends Phaser.Scene {
       }
     });
 
+    // Cancel long-press if pointer leaves the button.
+    this.tiltButton.on('pointerout', () => {
+      if (longPressTimer) {
+        longPressTimer.remove();
+        longPressTimer = null;
+      }
+    });
+
     // Tilt indicator — a small circle with a dot showing current gravity
     // direction. Visible only when tilt is enabled.
     this.tiltIndicator = this.add.graphics();
@@ -413,6 +453,12 @@ export class GameScene extends Phaser.Scene {
   /**
    * Redraw the tilt indicator — a small circle in the top-left corner with
    * a dot showing the current gravity direction. Only drawn when tilt is on.
+   *
+   * The dot position reflects the actual gravity vector:
+   *   - 0° tilt → dot at bottom of circle (gravity points down)
+   *   - 90° right tilt → dot at right of circle (gravity points right)
+   *   - 45° tilt → dot at bottom-right (gravity points down-right)
+   * This gives immediate visual feedback for which way cubes will roll.
    */
   private updateTiltIndicator(): void {
     this.tiltIndicator.clear();
@@ -420,20 +466,44 @@ export class GameScene extends Phaser.Scene {
 
     const cx = 70;
     const cy = 90;
-    const r = 16;
+    const r = 18;
 
-    // Outer circle (always)
+    // Outer circle (always visible when tilt is on)
     this.tiltIndicator.lineStyle(2, 0x8a8aa8, 0.6);
     this.tiltIndicator.strokeCircle(cx, cy, r);
 
-    // Direction dot — position based on tilt angle
-    const tiltDeg = TiltController.getTiltDegrees();
-    const angleRad = (tiltDeg * Math.PI) / 180;
-    const dotX = cx + Math.sin(angleRad) * (r - 4);
-    const dotY = cy + Math.cos(angleRad) * (r - 4); // 0° = straight down
+    // Cross hairs (subtle, to show the neutral center)
+    this.tiltIndicator.lineStyle(1, 0x8a8aa8, 0.3);
+    this.tiltIndicator.lineBetween(cx - r, cy, cx + r, cy);
+    this.tiltIndicator.lineBetween(cx, cy - r, cx, cy + r);
 
-    this.tiltIndicator.fillStyle(0xe94560, 1);
-    this.tiltIndicator.fillCircle(dotX, dotY, 4);
+    // Dot position from tilt angles.
+    // tiltDegX: -90 (left) to +90 (right). Positive = right.
+    // tiltDegY: -90 (back) to +90 (forward). Positive = forward (top edge down).
+    // We map tiltDegX → horizontal offset, tiltDegY → vertical offset.
+    const tiltDegX = TiltController.getTiltDegrees();
+    const tiltDegY = TiltController.getTiltDegreesY();
+    const maxOffset = r - 5;
+    const dotX = cx + (tiltDegX / 90) * maxOffset;
+    // Positive tiltDegY = top edge down = gravity tilts "up" on screen
+    // (cubes fall toward top of phone) → dot moves up.
+    const dotY = cy - (tiltDegY / 90) * maxOffset;
+
+    // Dot color: brighter when tilt is stronger (further from center)
+    const tiltMag = Math.hypot(tiltDegX, tiltDegY) / 90;
+    const dotColor = Phaser.Display.Color.GetColor(
+      233, // red
+      Math.max(100, 200 - tiltMag * 100),
+      80
+    );
+
+    this.tiltIndicator.fillStyle(dotColor, 1);
+    this.tiltIndicator.fillCircle(dotX, dotY, 5);
+
+    // Direction arrow from center to dot — makes the gravity direction
+    // instantly readable even at small tilt angles.
+    this.tiltIndicator.lineStyle(2, dotColor, 0.8);
+    this.tiltIndicator.lineBetween(cx, cy, dotX, dotY);
   }
 
   private updateScoreUI(score: number, best: number): void {
