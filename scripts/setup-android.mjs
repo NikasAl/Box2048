@@ -217,7 +217,13 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 // Yandex Mobile Ads SDK 8.x imports.
 // Breaking changes vs 7.x:
 //   - com.yandex.mobile.ads.common.MobileAds  →  com.yandex.mobile.ads.common.YandexAds
+//     (Kotlin object — in Java, call YandexAds.INSTANCE.initialize(...),
+//      NOT YandexAds.initialize(...) which is a static method placeholder
+//      that doesn't actually dispatch to the singleton)
 //   - AdRequestConfiguration removed          →  use AdRequest.Builder(adUnitId).build()
+//   - BannerAdSize.fixedSize/inlineSize       →  BannerAdSize.inline(ctx, wDp, hDp)
+//   - BannerAdView.setAdUnitId removed        →  ad unit id passed via AdRequest.Builder(adUnitId)
+//   - BannerAdEventListener: only 4 methods   →  onAdLoaded, onAdFailedToLoad, onAdClicked, onImpression
 import com.yandex.mobile.ads.banner.BannerAdEventListener;
 import com.yandex.mobile.ads.banner.BannerAdSize;
 import com.yandex.mobile.ads.banner.BannerAdView;
@@ -241,6 +247,7 @@ import com.yandex.mobile.ads.rewarded.RewardedAdLoader;
 import android.view.Gravity;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
+import android.widget.RelativeLayout;
 
 @CapacitorPlugin(
     name = "YandexAds"
@@ -272,8 +279,12 @@ public class YandexAdsPlugin extends Plugin {
         android.util.Log.i("YandexAds", "=== load() called, initializing SDK ===");
         mainHandler.post(() -> {
             try {
-                // SDK 8.x: YandexAds.initialize() (was MobileAds.initialize() in 7.x)
-                YandexAds.initialize(getContext(), new InitializationListener() {
+                // SDK 8.x: YandexAds is a Kotlin object (singleton).
+                // In Java, you MUST access it via YandexAds.INSTANCE.initialize(...)
+                // — calling YandexAds.initialize(...) directly compiles but does
+                // NOT dispatch to the singleton at runtime (it's a static
+                // placeholder method).
+                YandexAds.INSTANCE.initialize(getContext(), new InitializationListener() {
                     @Override
                     public void onInitializationCompleted() {
                         sdkInitialized = true;
@@ -529,29 +540,25 @@ public class YandexAdsPlugin extends Plugin {
     // Banner ad
     // ====================================================================
     //
-    // Banner is a persistent native view anchored to the bottom of the
-    // screen, overlaid on top of the WebView. We use the Yandex SDK 8.x
-    // adaptive sticky banner API:
+    // Adapted from the working implementation in Di2048
+    // (https://github.com/NikasAl/Di2048) which uses Yandex SDK 8.1.0.
     //
-    //   BannerAdSize.stickySize(context, adWidthDp)
-    //     - Adaptive size that fills the available width.
-    //     - The sticky banner auto-refreshes at the SDK's default interval
-    //       (which respects Yandex policy — minimum 30s — automatically).
-    //       We do NOT need to set a refresh interval manually; the SDK
-    //       handles it.
+    // Key API facts for 8.1.0 (verified against both the AAR and Di2048):
+    //   - BannerAdView(Context) constructor only — no setAdUnitId().
+    //   - BannerAdSize.inline(ctx, widthDp, heightDp) — adaptive inline
+    //     banner with explicit height (we use 100dp, matches Di2048).
+    //     sticky(ctx, w) also exists but inline is more predictable.
+    //   - Ad unit id is passed via AdRequest.Builder(adUnitId).build().
+    //   - BannerAdEventListener has 4 methods: onAdLoaded, onAdFailedToLoad,
+    //     onAdClicked, onImpression.
+    //   - The view is added to the activity's root RelativeLayout with
+    //     ALIGN_PARENT_BOTTOM + CENTER_HORIZONTAL.
     //
-    // Lifecycle:
-    //   showBannerAd() creates the view, sets adUnitId + adSize, registers
-    //     the BannerAdEventListener, adds the view to the activity's root
-    //     view, and loads the first ad creative via AdRequest.Builder.
-    //   hideBannerAd() removes the view and calls destroy() to free the
-    //     BannerAdView and stop refresh timers.
-    //
-    // NOTE on SDK 8.x API differences vs 7.x (and my earlier mistakes):
-    //   - BannerAdSize.BANNER_320x50 was removed → use BannerAdSize.stickySize(ctx, widthDp)
-    //   - setAdEventListener() was renamed → setBannerAdEventListener()
-    //   - setAutoRefreshInterval(Duration) was removed → auto-refresh is built into stickySize
-    //   - BannerAdEventListener.onImpression signature uses @Nullable ImpressionData
+    // IMPORTANT: the demo ad unit id 'demo-banner-yandex' may return
+    // 'no fill' in production. For real banner delivery you need a real
+    // ad unit id from the Yandex Advertising Network dashboard (format
+    // 'R-M-XXXXXX-X'). The plugin logs load failures so you can verify
+    // via 'npm run android:log' (filter by 'YandexAds' tag).
 
     @PluginMethod
     public void showBannerAd(final PluginCall call) {
@@ -574,31 +581,13 @@ public class YandexAdsPlugin extends Plugin {
 
                 bannerAdView = new BannerAdView(activity);
 
-                // SDK 8.1.0 API (verified by inspecting the AAR directly):
-                //   - BannerAdView has NO setAdUnitId() method.
-                //     The ad unit id is passed via AdRequest.Builder(adUnitId).
-                //   - BannerAdView.setAdSize(BannerAdSize) exists.
-                //   - BannerAdSize.stickySize() does NOT exist in Java —
-                //     it's a Kotlin-only name. The @JvmStatic method is
-                //     named BannerAdSize.sticky(Context, int).
-                //   - The official docs use Kotlin examples where
-                //     stickySize is a top-level function; the Java
-                //     equivalent is the static method BannerAdSize.sticky().
+                // Adaptive inline banner: width = min(screenWidthDp, 728),
+                // height = 100 dp. This matches Di2048's working setup.
                 android.util.DisplayMetrics dm = activity.getResources().getDisplayMetrics();
                 int screenWidthDp = Math.round(dm.widthPixels / dm.density);
-                BannerAdSize adSize = BannerAdSize.sticky(activity, screenWidthDp);
-                bannerAdView.setAdSize(adSize);
+                int widthDp = Math.min(screenWidthDp, 728);
+                bannerAdView.setAdSize(BannerAdSize.inline(activity, widthDp, 100));
 
-                // SDK 8.x: setBannerAdEventListener (NOT setAdEventListener).
-                // The listener interface in 8.1.0 has exactly 4 methods
-                // (verified by inspecting the AAR):
-                //   onAdLoaded()
-                //   onAdFailedToLoad(@NotNull AdRequestError)
-                //   onAdClicked()
-                //   onImpression(@Nullable ImpressionData)
-                // The official docs show 6 methods (with onLeftApplication
-                // and onReturnedToApplication), but those don't exist in
-                // the 8.1.0 AAR — they were removed in 8.x.
                 bannerAdView.setBannerAdEventListener(new BannerAdEventListener() {
                     @Override
                     public void onAdLoaded() {
@@ -622,22 +611,27 @@ public class YandexAdsPlugin extends Plugin {
                 });
 
                 // Add the banner to the activity's root content view,
-                // anchored to the bottom-center.
+                // anchored to the bottom-center. Using RelativeLayout rules
+                // (ALIGN_PARENT_BOTTOM + CENTER_HORIZONTAL) — same approach
+                // as Di2048, more reliable than FrameLayout gravity on
+                // some OEM ROMs.
                 ViewGroup rootView = (ViewGroup) activity.findViewById(android.R.id.content);
-                FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.WRAP_CONTENT
+                RelativeLayout.LayoutParams params = new RelativeLayout.LayoutParams(
+                    RelativeLayout.LayoutParams.MATCH_PARENT,
+                    RelativeLayout.LayoutParams.WRAP_CONTENT
                 );
-                params.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+                params.addRule(RelativeLayout.CENTER_HORIZONTAL);
+                params.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM);
                 bannerAdView.setLayoutParams(params);
                 rootView.addView(bannerAdView);
 
-                // Load the first ad creative. Sticky banner auto-refreshes
-                // afterwards at the SDK's default interval (≥30s, Yandex policy).
+                // Load the first ad creative. The ad unit id is passed
+                // via AdRequest.Builder — BannerAdView has no setAdUnitId.
                 final AdRequest adRequest = new AdRequest.Builder(adUnitId).build();
                 bannerAdView.loadAd(adRequest);
+                bannerAdView.setVisibility(android.view.View.VISIBLE);
 
-                android.util.Log.i("YandexAds", "Banner shown, adUnitId=" + adUnitId + ", widthDp=" + screenWidthDp);
+                android.util.Log.i("YandexAds", "Banner shown, adUnitId=" + adUnitId + ", widthDp=" + widthDp);
                 JSObject result = new JSObject();
                 result.put("shown", true);
                 call.resolve(result);

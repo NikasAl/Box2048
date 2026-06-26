@@ -10,14 +10,14 @@ export const GAME_WIDTH = 540;
 export const GAME_HEIGHT = 960;
 
 // Playfield geometry (the area where cubes can fall and stack).
-// FIELD_BOTTOM leaves 80px at the bottom of the screen reserved for the
-// banner ad overlay (banner is 50dp tall + 30px safety margin). The banner
+// FIELD_BOTTOM leaves 130px at the bottom of the screen reserved for the
+// banner ad overlay (banner is 100dp tall + 30px safety margin). The banner
 // is a native Android view anchored to the bottom of the screen; without
 // this margin it would overlap the bottom row of stacked cubes.
 export const FIELD_LEFT = 30;
 export const FIELD_RIGHT = GAME_WIDTH - 30;
 export const FIELD_TOP = 220;
-export const FIELD_BOTTOM = GAME_HEIGHT - 80;
+export const FIELD_BOTTOM = GAME_HEIGHT - 130;
 export const FIELD_WIDTH = FIELD_RIGHT - FIELD_LEFT;
 
 // The danger line: if any cube stays above this line for too long,
@@ -116,18 +116,22 @@ export const COLORS = {
 };
 
 // Ad unit configuration.
-// DEMO ad unit IDs from Yandex Mobile Ads documentation — safe for testing,
-// they always serve test creatives and won't get your account flagged.
-// Replace with real IDs from the Yandex Advertising Network dashboard
-// (https://yandex.ru/dev/mobile-ads/) before publishing.
 //
-// Yandex demo IDs (see https://yandex.ru/dev/mobile-ads/doc/dg/android/about-test-adunits.html):
-//   Interstitial (full-screen):  'demo-interstitial-yandex'
-//   Rewarded (video for reward): 'demo-rewarded-yandex'
-//   Banner (not used in this game yet)
+// Yandex SDK 8.x demo ad unit IDs sometimes return 'no fill' for banner
+// format (interstitial and rewarded demos work fine). If the banner
+// doesn't appear, check logcat via 'npm run android:log' — look for
+// 'Banner failed to load' messages with the YandexAds tag.
+//
+// For production, replace these with REAL ad unit IDs from the Yandex
+// Advertising Network dashboard (https://yandex.ru/dev/mobile-ads/).
+// Real IDs have the format 'R-M-XXXXXX-X' (e.g. 'R-M-2252991-1').
+//
+// Yandex demo IDs:
+//   Interstitial:  'demo-interstitial-yandex'
+//   Rewarded:      'demo-rewarded-yandex'
+//   Banner:        'demo-banner-yandex'  (often returns 'no fill' —
+//                                         consider using a real ID for testing)
 export const ADS_CONFIG = {
-  // Use Yandex's official demo ad unit IDs for development.
-  // Replace these with your real ad unit IDs before release.
   interstitialAdId: 'demo-interstitial-yandex',
   rewardedAdId: 'demo-rewarded-yandex',
   bannerAdId: 'demo-banner-yandex',
