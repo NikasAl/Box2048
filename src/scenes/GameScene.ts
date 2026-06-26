@@ -149,6 +149,9 @@ export class GameScene extends Phaser.Scene {
       this.cubes.clear();
       this.currentCube = null;
       this.queuedTap = null;
+      // Hide the banner ad when leaving the gameplay scene — it should
+      // only be visible during active gameplay, not on menus or game-over.
+      AdsManager.getInstance().hideBanner().catch(() => {});
     });
 
     // Spawn the first cube.
@@ -157,6 +160,11 @@ export class GameScene extends Phaser.Scene {
     // Unlock audio on first interaction (browsers require a user gesture
     // before any AudioContext can produce sound).
     AudioManager.getInstance().unlock();
+
+    // Show the banner ad at the bottom of the screen during gameplay.
+    // (No-op on web; on native Android the BannerAdView is overlaid
+    // via the YandexAds plugin.)
+    AdsManager.getInstance().showBanner().catch(() => {});
   }
 
   update(_time: number, deltaMs: number): void {
@@ -191,6 +199,8 @@ export class GameScene extends Phaser.Scene {
     // Solid static walls: left, right, bottom. The top is open (cubes spawn there).
     const wallThickness = 60;
     const wallOptions = WALL_PHYSICS;
+
+    // Bottom wall (floor of the playfield).
     const wallY = FIELD_BOTTOM + wallThickness / 2;
     const bottomWall = this.matter.add.rectangle(
       (FIELD_LEFT + FIELD_RIGHT) / 2,
@@ -199,21 +209,43 @@ export class GameScene extends Phaser.Scene {
       wallThickness,
       wallOptions
     );
+
+    // Side walls — EXTEND UPWARD beyond the danger line so cubes that
+    // bounce high after a merge (or get pushed by shockwaves) can't
+    // escape sideways above the visible playfield.
+    // Wall spans from y=0 (top of screen) to y=FIELD_BOTTOM.
+    // The visible part is below the danger line; the extension above
+    // is invisible but physically prevents cubes from leaving the field.
+    const wallHeight = FIELD_BOTTOM + wallThickness;
+    const wallCenterY = wallHeight / 2;
     const leftWall = this.matter.add.rectangle(
       FIELD_LEFT - wallThickness / 2,
-      (FIELD_TOP + FIELD_BOTTOM) / 2,
+      wallCenterY,
       wallThickness,
-      FIELD_BOTTOM - FIELD_TOP + wallThickness * 2,
+      wallHeight,
       wallOptions
     );
     const rightWall = this.matter.add.rectangle(
       FIELD_RIGHT + wallThickness / 2,
-      (FIELD_TOP + FIELD_BOTTOM) / 2,
+      wallCenterY,
       wallThickness,
-      FIELD_BOTTOM - FIELD_TOP + wallThickness * 2,
+      wallHeight,
       wallOptions
     );
-    this.walls = [bottomWall, leftWall, rightWall];
+
+    // Invisible ceiling — catches cubes that fly too high after a merge
+    // and bounces them back down. Placed off-screen at y=-40 so the
+    // player never sees a cube hit the ceiling.
+    const ceilingY = -40;
+    const ceilingWall = this.matter.add.rectangle(
+      (FIELD_LEFT + FIELD_RIGHT) / 2,
+      ceilingY,
+      FIELD_RIGHT - FIELD_LEFT + wallThickness * 2,
+      wallThickness,
+      wallOptions
+    );
+
+    this.walls = [bottomWall, leftWall, rightWall, ceilingWall];
   }
 
   private drawDangerLine(): void {
@@ -408,6 +440,11 @@ export class GameScene extends Phaser.Scene {
 
   private showMilestone(value: number): void {
     this.milestoneOverlayActive = true;
+    // Clear any queued tap so that taps accumulated during the rapid-fire
+    // gameplay just before the milestone don't fire immediately when the
+    // dialog is dismissed (which could cause unwanted cube launches and
+    // also interfere with the interstitial ad flow).
+    this.queuedTap = null;
     // Launch the overlay scene on top of this one. It will pause this scene
     // and resume it when dismissed.
     this.scene.launch('MilestoneScene', { value });

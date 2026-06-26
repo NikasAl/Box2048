@@ -99,10 +99,15 @@ export class MergeSystem {
 
     // Capture velocities BEFORE destroying the bodies — after destroy,
     // body.velocity becomes undefined.
+    // Note: upward boost reduced from -1.5 to -0.8 to prevent cubes from
+    // flying too high after a merge (which previously let them escape
+    // above the field). Side walls + ceiling are still in place as a
+    // physical backstop, but reducing the boost here keeps gameplay
+    // feel natural without cubes bouncing off-screen.
     const aBody = a.body as any;
     const bBody = b.body as any;
     const vx = ((aBody?.velocity?.x ?? 0) + (bBody?.velocity?.x ?? 0)) / 2;
-    const vy = ((aBody?.velocity?.y ?? 0) + (bBody?.velocity?.y ?? 0)) / 2 - 1.5;
+    const vy = ((aBody?.velocity?.y ?? 0) + (bBody?.velocity?.y ?? 0)) / 2 - 0.8;
 
     // Remove both cubes from the registry first, then destroy the bodies.
     scene.unregisterCube(a);

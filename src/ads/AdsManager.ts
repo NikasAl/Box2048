@@ -31,6 +31,8 @@ export interface YandexAdsPlugin {
   initialize(): Promise<void>;
   showRewardedAd(options: { adUnitId: string }): Promise<{ granted: boolean; error?: string }>;
   showInterstitialAd(options: { adUnitId: string }): Promise<{ shown: boolean; error?: string }>;
+  showBannerAd(options: { adUnitId: string }): Promise<{ shown: boolean; error?: string }>;
+  hideBannerAd(): Promise<{ hidden: boolean; error?: string }>;
 }
 
 const YandexAds = registerPlugin<YandexAdsPlugin>('YandexAds');
@@ -128,6 +130,36 @@ class AdsManager {
     } catch (e) {
       console.warn('[Ads] showRewardedAd failed:', e);
       return false;
+    }
+  }
+
+  /**
+   * Show a banner ad overlaid at the bottom of the screen.
+   * The banner auto-refreshes at 30s interval (Yandex policy minimum).
+   * Call hideBanner() to remove it.
+   *
+   * On web, this is a no-op.
+   */
+  async showBanner(): Promise<void> {
+    if (!Capacitor.isNativePlatform()) return;
+    try {
+      await YandexAds.showBannerAd({ adUnitId: ADS_CONFIG.bannerAdId });
+      console.info('[Ads] Banner shown.');
+    } catch (e) {
+      console.warn('[Ads] showBannerAd failed:', e);
+    }
+  }
+
+  /**
+   * Hide the banner ad (if shown). Safe to call multiple times.
+   */
+  async hideBanner(): Promise<void> {
+    if (!Capacitor.isNativePlatform()) return;
+    try {
+      await YandexAds.hideBannerAd();
+      console.info('[Ads] Banner hidden.');
+    } catch (e) {
+      console.warn('[Ads] hideBannerAd failed:', e);
     }
   }
 }

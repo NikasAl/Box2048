@@ -18,7 +18,15 @@ export class PreloadScene extends Phaser.Scene {
    * Note: texture generation runs in create(), not preload().
    * CanvasTexture and this.textures API require the scene to be active,
    * which only happens once create() is entered.
+   *
+   * The icon PNG is loaded via the standard Phaser loader in preload(),
+   * since it's an external asset file (not generated).
    */
+  preload(): void {
+    // App icon (used on the intro/menu screen).
+    this.load.image('app-icon', 'assets/icon.png');
+  }
+
   create(): void {
     this.makeParticleTexture();
     this.makeCubeTextures();

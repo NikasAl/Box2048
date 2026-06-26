@@ -17,8 +17,39 @@ export class MenuScene extends Phaser.Scene {
     const { width, height } = this.scale;
     this.cameras.main.setBackgroundColor(COLORS.background);
 
+    // App icon — large, above the title. Adds visual identity to the
+    // intro screen and breaks up the otherwise text-only layout.
+    // Displayed at 180x180 (the source PNG is 512x512 so it downscales cleanly).
+    const iconSize = 180;
+    const iconY = height * 0.13;
+    if (this.textures.exists('app-icon')) {
+      const icon = this.add.image(width / 2, iconY, 'app-icon');
+      icon.setDisplaySize(iconSize, iconSize);
+      // Subtle entrance animation: scale up from 0.5 with a bounce.
+      icon.setScale(0.5);
+      icon.setAlpha(0);
+      this.tweens.add({
+        targets: icon,
+        scale: iconSize / icon.width, // back to display size
+        alpha: 1,
+        duration: 600,
+        ease: 'Back.out',
+        delay: 100
+      });
+      // Gentle floating after entrance.
+      this.tweens.add({
+        targets: icon,
+        y: iconY - 6,
+        duration: 1800,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.inOut',
+        delay: 700
+      });
+    }
+
     // Title
-    const title = this.add.text(width / 2, height * 0.26, i18n.t('menu.title'), {
+    const title = this.add.text(width / 2, height * 0.30, i18n.t('menu.title'), {
       fontFamily: 'Arial Black, Arial, sans-serif',
       fontSize: '64px',
       color: '#ffffff'
@@ -28,7 +59,7 @@ export class MenuScene extends Phaser.Scene {
 
     // Subtitle
     this.add
-      .text(width / 2, height * 0.26 + 60, i18n.t('menu.subtitle'), {
+      .text(width / 2, height * 0.30 + 60, i18n.t('menu.subtitle'), {
         fontFamily: 'Arial, sans-serif',
         fontSize: '22px',
         color: '#8a8aa8'
@@ -38,7 +69,7 @@ export class MenuScene extends Phaser.Scene {
     // Best score
     const best = Number(localStorage.getItem(STORAGE_KEYS.bestScore) ?? 0);
     this.add
-      .text(width / 2, height * 0.43, i18n.t('menu.best', { score: best }), {
+      .text(width / 2, height * 0.47, i18n.t('menu.best', { score: best }), {
         fontFamily: 'Arial, sans-serif',
         fontSize: '28px',
         color: '#e94560'
@@ -46,7 +77,7 @@ export class MenuScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     // Play button
-    this.makePrimaryButton(width / 2, height * 0.58, i18n.t('menu.play'), () => {
+    this.makePrimaryButton(width / 2, height * 0.62, i18n.t('menu.play'), () => {
       this.scene.start('GameScene');
     });
 

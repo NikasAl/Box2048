@@ -146,8 +146,12 @@ export class MilestoneScene extends Phaser.Scene {
     };
 
     btnBg.on('pointerup', dismiss);
-    // Also allow tap-anywhere-to-dismiss for fast players.
-    this.input.on('pointerdown', dismiss);
+    // NOTE: previously we also bound this.input.on('pointerdown', dismiss)
+    // so the dialog could be closed by tapping anywhere. Removed because
+    // a series of fast taps (from the gameplay just before the milestone)
+    // would leak through and dismiss the dialog immediately — preventing
+    // the interstitial from ever being shown. Now the only way to close
+    // the dialog is to click the "Continue" button explicitly.
 
     // Pause the underlying GameScene while the dialog is up.
     if (this.scene.isActive('GameScene')) {

@@ -32,7 +32,10 @@ export class ShockWaveSystem {
     const magnitudeScale = Math.min(3, Math.log2(value));
     const radius = SHOCKWAVE.radius * (0.7 + 0.15 * magnitudeScale);
     const strength = SHOCKWAVE.strength * magnitudeScale;
-    const uplift = SHOCKWAVE.uplift * magnitudeScale;
+    // Uplift (upward component) — reduced by half to prevent cubes from
+    // being launched above the danger line and getting stuck above the
+    // playfield. The radial outward push is preserved for visual effect.
+    const uplift = (SHOCKWAVE.uplift * magnitudeScale) * 0.5;
 
     const cubes = this.scene.getCubes();
     for (const cube of cubes) {

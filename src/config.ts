@@ -10,10 +10,14 @@ export const GAME_WIDTH = 540;
 export const GAME_HEIGHT = 960;
 
 // Playfield geometry (the area where cubes can fall and stack).
+// FIELD_BOTTOM leaves 80px at the bottom of the screen reserved for the
+// banner ad overlay (banner is 50dp tall + 30px safety margin). The banner
+// is a native Android view anchored to the bottom of the screen; without
+// this margin it would overlap the bottom row of stacked cubes.
 export const FIELD_LEFT = 30;
 export const FIELD_RIGHT = GAME_WIDTH - 30;
-export const FIELD_TOP = 220; // cubes spawn above this line
-export const FIELD_BOTTOM = GAME_HEIGHT - 30;
+export const FIELD_TOP = 220;
+export const FIELD_BOTTOM = GAME_HEIGHT - 80;
 export const FIELD_WIDTH = FIELD_RIGHT - FIELD_LEFT;
 
 // The danger line: if any cube stays above this line for too long,

@@ -218,6 +218,9 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 // Breaking changes vs 7.x:
 //   - com.yandex.mobile.ads.common.MobileAds  →  com.yandex.mobile.ads.common.YandexAds
 //   - AdRequestConfiguration removed          →  use AdRequest.Builder(adUnitId).build()
+import com.yandex.mobile.ads.banner.BannerAdEventListener;
+import com.yandex.mobile.ads.banner.BannerAdSize;
+import com.yandex.mobile.ads.banner.BannerAdView;
 import com.yandex.mobile.ads.common.AdError;
 import com.yandex.mobile.ads.common.AdRequest;
 import com.yandex.mobile.ads.common.AdRequestError;
@@ -234,6 +237,12 @@ import com.yandex.mobile.ads.rewarded.RewardedAdEventListener;
 import com.yandex.mobile.ads.rewarded.RewardedAdLoadListener;
 import com.yandex.mobile.ads.rewarded.RewardedAdLoader;
 
+// Android View imports for banner overlay
+import android.view.Gravity;
+import android.view.ViewGroup;
+import android.widget.FrameLayout;
+import java.time.Duration;
+
 @CapacitorPlugin(
     name = "YandexAds"
 )
@@ -247,6 +256,8 @@ public class YandexAdsPlugin extends Plugin {
     private InterstitialAd interstitialAd = null;
     @Nullable
     private InterstitialAdLoader interstitialAdLoader = null;
+    @Nullable
+    private BannerAdView bannerAdView = null;
     private boolean rewardGranted = false;
     private PluginCall savedCall = null;
     private boolean interstitialCallSaved = false;
@@ -274,6 +285,15 @@ public class YandexAdsPlugin extends Plugin {
                 android.util.Log.e("YandexAds", "SDK init error in load(): " + e.getMessage(), e);
             }
         });
+    }
+
+    @Override
+    public void handleOnDestroy() {
+        // Make sure to clean up the banner when the plugin (and thus the
+        // activity) is being torn down — otherwise the auto-refresh timer
+        // keeps running and leaks memory.
+        hideBannerView();
+        super.handleOnDestroy();
     }
 
     @PluginMethod
@@ -504,6 +524,133 @@ public class YandexAdsPlugin extends Plugin {
         } catch (Exception ignored) {
         }
         savedCall = null;
+    }
+
+    // ====================================================================
+    // Banner ad
+    // ====================================================================
+    //
+    // Banner is a persistent native view anchored to the bottom of the
+    // screen, overlaid on top of the WebView. The Yandex SDK's
+    // BannerAdView has built-in auto-refresh — we configure the interval
+    // to 30 seconds (the Yandex policy minimum; 20s would violate it).
+    //
+    // Lifecycle:
+    //   showBannerAd() creates the view, adds it to the activity's root
+    //     view, loads the first ad creative, and starts auto-refresh.
+    //   hideBannerAd() removes the view and calls destroy() to free the
+    //     BannerAdView and stop refresh timers.
+
+    @PluginMethod
+    public void showBannerAd(final PluginCall call) {
+        final String adUnitId = call.getString("adUnitId");
+        if (adUnitId == null || adUnitId.isEmpty()) {
+            call.reject("adUnitId is required");
+            return;
+        }
+
+        mainHandler.post(() -> {
+            try {
+                final Activity activity = getActivity();
+                if (activity == null) {
+                    call.reject("Activity is null");
+                    return;
+                }
+
+                // If a banner is already shown, remove it first.
+                hideBannerView();
+
+                bannerAdView = new BannerAdView(activity);
+                bannerAdView.setAdUnitId(adUnitId);
+                // Standard banner size: 320x50 dp.
+                bannerAdView.setAdSize(BannerAdSize.BANNER_320x50);
+
+                // Yandex policy: minimum auto-refresh interval is 30s.
+                // We set 30s explicitly (default is 60s).
+                bannerAdView.setAutoRefreshInterval(Duration.ofSeconds(30));
+
+                bannerAdView.setAdEventListener(new BannerAdEventListener() {
+                    @Override
+                    public void onAdLoaded() {
+                        android.util.Log.i("YandexAds", "Banner loaded");
+                    }
+
+                    @Override
+                    public void onAdFailedToLoad(@NonNull AdRequestError error) {
+                        android.util.Log.w("YandexAds", "Banner failed to load: " + error);
+                    }
+
+                    @Override
+                    public void onAdClicked() {
+                        android.util.Log.i("YandexAds", "Banner clicked");
+                    }
+
+                    @Override
+                    public void onLeftApplication() {}
+
+                    @Override
+                    public void onReturnedToApplication() {}
+
+                    @Override
+                    public void onAdImpression(@Nullable ImpressionData impressionData) {
+                        android.util.Log.i("YandexAds", "Banner impression");
+                    }
+                });
+
+                // Add the banner to the activity's root content view,
+                // anchored to the bottom-center.
+                ViewGroup rootView = (ViewGroup) activity.findViewById(android.R.id.content);
+                FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT
+                );
+                params.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+                bannerAdView.setLayoutParams(params);
+                rootView.addView(bannerAdView);
+
+                // Load the first ad creative. Auto-refresh will handle
+                // subsequent loads at the configured 30s interval.
+                final AdRequest adRequest = new AdRequest.Builder(adUnitId).build();
+                bannerAdView.loadAd(adRequest);
+
+                android.util.Log.i("YandexAds", "Banner shown, adUnitId=" + adUnitId);
+                JSObject result = new JSObject();
+                result.put("shown", true);
+                call.resolve(result);
+            } catch (Exception e) {
+                android.util.Log.e("YandexAds", "Exception in showBannerAd: " + e.getMessage(), e);
+                call.reject("Exception: " + e.getMessage());
+            }
+        });
+    }
+
+    @PluginMethod
+    public void hideBannerAd(final PluginCall call) {
+        mainHandler.post(() -> {
+            try {
+                hideBannerView();
+                android.util.Log.i("YandexAds", "Banner hidden");
+                JSObject result = new JSObject();
+                result.put("hidden", true);
+                call.resolve(result);
+            } catch (Exception e) {
+                android.util.Log.e("YandexAds", "Exception in hideBannerAd: " + e.getMessage(), e);
+                call.reject("Exception: " + e.getMessage());
+            }
+        });
+    }
+
+    private void hideBannerView() {
+        if (bannerAdView == null) return;
+        try {
+            ViewGroup parent = (ViewGroup) bannerAdView.getParent();
+            if (parent != null) {
+                parent.removeView(bannerAdView);
+            }
+            bannerAdView.destroy();
+        } catch (Exception ignored) {
+        }
+        bannerAdView = null;
     }
 }
 `;
