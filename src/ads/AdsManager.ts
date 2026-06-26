@@ -135,7 +135,8 @@ class AdsManager {
 
   /**
    * Show a banner ad overlaid at the bottom of the screen.
-   * The banner auto-refreshes at 30s interval (Yandex policy minimum).
+   * Uses Yandex SDK 8.x adaptive sticky banner — auto-refreshes at the
+   * SDK's default interval (≥30s, respects Yandex policy automatically).
    * Call hideBanner() to remove it.
    *
    * On web, this is a no-op.

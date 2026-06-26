@@ -241,7 +241,6 @@ import com.yandex.mobile.ads.rewarded.RewardedAdLoader;
 import android.view.Gravity;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
-import java.time.Duration;
 
 @CapacitorPlugin(
     name = "YandexAds"
@@ -531,15 +530,28 @@ public class YandexAdsPlugin extends Plugin {
     // ====================================================================
     //
     // Banner is a persistent native view anchored to the bottom of the
-    // screen, overlaid on top of the WebView. The Yandex SDK's
-    // BannerAdView has built-in auto-refresh — we configure the interval
-    // to 30 seconds (the Yandex policy minimum; 20s would violate it).
+    // screen, overlaid on top of the WebView. We use the Yandex SDK 8.x
+    // adaptive sticky banner API:
+    //
+    //   BannerAdSize.stickySize(context, adWidthDp)
+    //     - Adaptive size that fills the available width.
+    //     - The sticky banner auto-refreshes at the SDK's default interval
+    //       (which respects Yandex policy — minimum 30s — automatically).
+    //       We do NOT need to set a refresh interval manually; the SDK
+    //       handles it.
     //
     // Lifecycle:
-    //   showBannerAd() creates the view, adds it to the activity's root
-    //     view, loads the first ad creative, and starts auto-refresh.
+    //   showBannerAd() creates the view, sets adUnitId + adSize, registers
+    //     the BannerAdEventListener, adds the view to the activity's root
+    //     view, and loads the first ad creative via AdRequest.Builder.
     //   hideBannerAd() removes the view and calls destroy() to free the
     //     BannerAdView and stop refresh timers.
+    //
+    // NOTE on SDK 8.x API differences vs 7.x (and my earlier mistakes):
+    //   - BannerAdSize.BANNER_320x50 was removed → use BannerAdSize.stickySize(ctx, widthDp)
+    //   - setAdEventListener() was renamed → setBannerAdEventListener()
+    //   - setAutoRefreshInterval(Duration) was removed → auto-refresh is built into stickySize
+    //   - BannerAdEventListener.onImpression signature uses @Nullable ImpressionData
 
     @PluginMethod
     public void showBannerAd(final PluginCall call) {
@@ -562,14 +574,17 @@ public class YandexAdsPlugin extends Plugin {
 
                 bannerAdView = new BannerAdView(activity);
                 bannerAdView.setAdUnitId(adUnitId);
-                // Standard banner size: 320x50 dp.
-                bannerAdView.setAdSize(BannerAdSize.BANNER_320x50);
 
-                // Yandex policy: minimum auto-refresh interval is 30s.
-                // We set 30s explicitly (default is 60s).
-                bannerAdView.setAutoRefreshInterval(Duration.ofSeconds(30));
+                // Adaptive sticky size — fills the screen width.
+                // Convert screen px width to dp and pass to stickySize().
+                android.util.DisplayMetrics dm = activity.getResources().getDisplayMetrics();
+                int screenWidthDp = Math.round(dm.widthPixels / dm.density);
+                BannerAdSize adSize = BannerAdSize.stickySize(activity, screenWidthDp);
+                bannerAdView.setAdSize(adSize);
 
-                bannerAdView.setAdEventListener(new BannerAdEventListener() {
+                // SDK 8.x: setBannerAdEventListener (NOT setAdEventListener).
+                // The listener is required for ad load/fail callbacks.
+                bannerAdView.setBannerAdEventListener(new BannerAdEventListener() {
                     @Override
                     public void onAdLoaded() {
                         android.util.Log.i("YandexAds", "Banner loaded");
@@ -592,7 +607,7 @@ public class YandexAdsPlugin extends Plugin {
                     public void onReturnedToApplication() {}
 
                     @Override
-                    public void onAdImpression(@Nullable ImpressionData impressionData) {
+                    public void onImpression(@Nullable ImpressionData impressionData) {
                         android.util.Log.i("YandexAds", "Banner impression");
                     }
                 });
@@ -608,12 +623,12 @@ public class YandexAdsPlugin extends Plugin {
                 bannerAdView.setLayoutParams(params);
                 rootView.addView(bannerAdView);
 
-                // Load the first ad creative. Auto-refresh will handle
-                // subsequent loads at the configured 30s interval.
+                // Load the first ad creative. Sticky banner auto-refreshes
+                // afterwards at the SDK's default interval (≥30s, Yandex policy).
                 final AdRequest adRequest = new AdRequest.Builder(adUnitId).build();
                 bannerAdView.loadAd(adRequest);
 
-                android.util.Log.i("YandexAds", "Banner shown, adUnitId=" + adUnitId);
+                android.util.Log.i("YandexAds", "Banner shown, adUnitId=" + adUnitId + ", widthDp=" + screenWidthDp);
                 JSObject result = new JSObject();
                 result.put("shown", true);
                 call.resolve(result);
