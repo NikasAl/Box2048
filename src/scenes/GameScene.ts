@@ -44,6 +44,7 @@ import { ShockWaveSystem } from '../systems/ShockWaveSystem';
 import { AudioManager } from '../systems/AudioManager';
 import { AdsManager } from '../ads/AdsManager';
 import { i18n } from '../systems/I18n';
+import { GameStatePersistence, type SavedGameState } from '../systems/GameStatePersistence';
 
 export class GameScene extends Phaser.Scene {
   // World bounds (as Matter static walls)
@@ -103,10 +104,14 @@ export class GameScene extends Phaser.Scene {
     this.drawDangerLine();
     this.drawUI();
 
+    // Try to load saved state. If found, restore cubes/score/milestones.
+    // If not found (fresh start or after game over), start normally.
+    const savedState = GameStatePersistence.load();
+
     // Reset state
     this.cubes.clear();
     this.canLaunch = true;
-    this.nextValue = this.pickSpawnValue();
+    this.nextValue = savedState?.nextValue ?? this.pickSpawnValue();
 
     // Systems
     this.spawner = new Spawner(this);
@@ -116,8 +121,17 @@ export class GameScene extends Phaser.Scene {
     this.gameOverDetector = new GameOverDetector(this, this);
     this.shockWaveSystem = new ShockWaveSystem(this);
 
-    // Reset milestone tracking at the start of each playthrough.
+    // Reset milestone tracking — restore from saved state if available.
     this.reachedMilestones.clear();
+    if (savedState) {
+      for (const v of savedState.reachedMilestones) {
+        this.reachedMilestones.add(v);
+      }
+      // Restore score (best is restored internally by ScoreSystem from localStorage).
+      if (savedState.score > 0) {
+        this.scoreSystem.addScore(savedState.score);
+      }
+    }
     this.milestoneOverlayActive = false;
     this.queuedTap = null;
 
@@ -128,8 +142,6 @@ export class GameScene extends Phaser.Scene {
     this.mergeSystem.onMerge((e) => this.onMerge(e));
 
     // Create ONE reusable particle emitter for the whole scene.
-    // (Previously we created a new emitter per merge, which caused particle
-    // pool churn and contributed to memory growth during long sessions.)
     this.mergeEmitter = this.add.particles(0, 0, 'particle', {
       lifespan: 600,
       speed: { min: 80, max: 220 },
@@ -139,22 +151,43 @@ export class GameScene extends Phaser.Scene {
     });
     this.mergeEmitter.setDepth(5);
 
+    // Restore cubes from saved state — recreate them as dynamic physics bodies
+    // at their saved positions/angles. Velocity is not restored (cubes should
+    // rest). This must happen AFTER systems are initialized so the merge
+    // system can process them.
+    if (savedState && savedState.cubes.length > 0) {
+      this.restoreCubes(savedState);
+    }
+
     // Cleanup on scene shutdown — kill any running tweens/timers so they
     // don't keep firing after the scene is gone (which would leak callbacks
     // and references to destroyed game objects).
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      // Save the current game state BEFORE destroying the scene — so the
+      // player can resume after returning to the menu or closing the app.
+      // (State is cleared separately on game over — see triggerGameOver.)
+      if (!this.gameOverDetector.isGameOver()) {
+        GameStatePersistence.saveFromScene({
+          cubes: this.cubes,
+          score: this.scoreSystem.getScore(),
+          best: this.scoreSystem.getBest(),
+          nextValue: this.nextValue,
+          reachedMilestones: this.reachedMilestones
+        });
+      }
       this.tweens.killAll();
       this.time.removeAllEvents();
       // Clear the cubes Set so destroyed cubes can be GC'd.
       this.cubes.clear();
       this.currentCube = null;
       this.queuedTap = null;
-      // Hide the banner ad when leaving the gameplay scene — it should
-      // only be visible during active gameplay, not on menus or game-over.
+      // Hide the banner ad when leaving the gameplay scene.
       AdsManager.getInstance().hideBanner().catch(() => {});
     });
 
-    // Spawn the first cube.
+    // Spawn the first cube (only if no saved state was restored — saved
+    // state already has cubes on the field and we just need a new floating
+    // cube to aim with).
     this.spawnNext();
 
     // Unlock audio on first interaction (browsers require a user gesture
@@ -510,6 +543,9 @@ export class GameScene extends Phaser.Scene {
     const best = this.scoreSystem.getBest();
     const isRecord = score >= best && score > 0;
 
+    // Clear the saved game state — a lost game should not be resumed.
+    GameStatePersistence.clear();
+
     // Persist death count for ad frequency control.
     const totalDeaths =
       Number(localStorage.getItem(STORAGE_KEYS.totalDeaths) ?? 0) + 1;
@@ -547,5 +583,28 @@ export class GameScene extends Phaser.Scene {
     cube.setVelocity(vx, vy);
     this.cubes.add(cube);
     return cube;
+  }
+
+  /**
+   * Restore cubes from a saved game state. Creates dynamic physics bodies
+   * at saved positions/angles with zero velocity. Called from create()
+   * when a saved state exists.
+   */
+  private restoreCubes(state: SavedGameState): void {
+    console.info(
+      `[GameScene] Restoring ${state.cubes.length} cubes from saved state (score=${state.score})`
+    );
+    for (const saved of state.cubes) {
+      // Clamp positions to within the field — saved cubes shouldn't be
+      // outside the walls, but just in case.
+      const x = Phaser.Math.Clamp(saved.x, FIELD_LEFT + 20, FIELD_RIGHT - 20);
+      const y = Phaser.Math.Clamp(saved.y, FIELD_TOP, FIELD_BOTTOM);
+      const cube = new Cube(this, x, y, saved.value, false);
+      cube.setAngle(saved.angle);
+      // Zero velocity — cubes should rest at their saved positions.
+      cube.setVelocity(0, 0);
+      cube.setAngularVelocity(0);
+      this.cubes.add(cube);
+    }
   }
 }

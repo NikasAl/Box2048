@@ -160,7 +160,11 @@ export const SHOCKWAVE = {
 export const STORAGE_KEYS = {
   bestScore: 'box2048_best_score',
   totalDeaths: 'box2048_total_deaths',
-  language: 'box2048_language'
+  language: 'box2048_language',
+  // Saved game state: cubes on the field + score + next cube + milestones.
+  // Used to resume the game from where the player left off after closing
+  // the app or returning to the menu.
+  savedState: 'box2048_saved_state'
 };
 
 // Supported languages. 'ru' is the default for the project's target audience.

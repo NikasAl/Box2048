@@ -7,6 +7,7 @@ import Phaser from 'phaser';
 import { COLORS, STORAGE_KEYS } from '../config';
 import { AdsManager } from '../ads/AdsManager';
 import { i18n, type Language } from '../systems/I18n';
+import { GameStatePersistence } from '../systems/GameStatePersistence';
 
 export class MenuScene extends Phaser.Scene {
   constructor() {
@@ -19,9 +20,10 @@ export class MenuScene extends Phaser.Scene {
 
     // App icon — large, above the title. Adds visual identity to the
     // intro screen and breaks up the otherwise text-only layout.
-    // Displayed at 180x180 (the source PNG is 512x512 so it downscales cleanly).
-    const iconSize = 180;
-    const iconY = height * 0.13;
+    // Displayed at 360x360 (doubled from the original 180x180 per user
+    // request — the source PNG is 512x512 so it downscales cleanly).
+    const iconSize = 360;
+    const iconY = height * 0.22;
     if (this.textures.exists('app-icon')) {
       const icon = this.add.image(width / 2, iconY, 'app-icon');
       icon.setDisplaySize(iconSize, iconSize);
@@ -39,7 +41,7 @@ export class MenuScene extends Phaser.Scene {
       // Gentle floating after entrance.
       this.tweens.add({
         targets: icon,
-        y: iconY - 6,
+        y: iconY - 8,
         duration: 1800,
         yoyo: true,
         repeat: -1,
@@ -48,8 +50,8 @@ export class MenuScene extends Phaser.Scene {
       });
     }
 
-    // Title
-    const title = this.add.text(width / 2, height * 0.30, i18n.t('menu.title'), {
+    // Title — positioned below the larger icon (was 0.30, moved down to 0.48)
+    const title = this.add.text(width / 2, height * 0.48, i18n.t('menu.title'), {
       fontFamily: 'Arial Black, Arial, sans-serif',
       fontSize: '64px',
       color: '#ffffff'
@@ -59,7 +61,7 @@ export class MenuScene extends Phaser.Scene {
 
     // Subtitle
     this.add
-      .text(width / 2, height * 0.30 + 60, i18n.t('menu.subtitle'), {
+      .text(width / 2, height * 0.48 + 60, i18n.t('menu.subtitle'), {
         fontFamily: 'Arial, sans-serif',
         fontSize: '22px',
         color: '#8a8aa8'
@@ -69,15 +71,31 @@ export class MenuScene extends Phaser.Scene {
     // Best score
     const best = Number(localStorage.getItem(STORAGE_KEYS.bestScore) ?? 0);
     this.add
-      .text(width / 2, height * 0.47, i18n.t('menu.best', { score: best }), {
+      .text(width / 2, height * 0.62, i18n.t('menu.best', { score: best }), {
         fontFamily: 'Arial, sans-serif',
         fontSize: '28px',
         color: '#e94560'
       })
       .setOrigin(0.5);
 
-    // Play button
-    this.makePrimaryButton(width / 2, height * 0.62, i18n.t('menu.play'), () => {
+    // If there's a saved game, show a "Continue" button above "New game".
+    // Tapping it starts GameScene without clearing the saved state —
+    // GameScene.create() will detect the state and restore cubes/score.
+    const hasSaved = GameStatePersistence.hasSavedState();
+    let playButtonY = height * 0.74;
+    if (hasSaved) {
+      // "Continue" button — resumes the saved game.
+      this.makePrimaryButton(width / 2, height * 0.74, i18n.t('menu.continue'), () => {
+        // Don't clear — GameScene will load the state.
+        this.scene.start('GameScene');
+      });
+      // Move the "New game" button down to make room.
+      playButtonY = height * 0.84;
+    }
+
+    // Play button — starts a NEW game (clears any saved state first).
+    this.makePrimaryButton(width / 2, playButtonY, i18n.t('menu.play'), () => {
+      GameStatePersistence.clear();
       this.scene.start('GameScene');
     });
 
