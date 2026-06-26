@@ -97,6 +97,9 @@ export class GameStatePersistence {
       nextValue: params.nextValue,
       reachedMilestones: Array.from(params.reachedMilestones)
     });
+    console.info(
+      `[GameStatePersistence] saved ${cubes.length} cubes, score=${params.score}, nextValue=${params.nextValue}`
+    );
   }
 
   /**
@@ -131,7 +134,9 @@ export class GameStatePersistence {
    */
   static hasSavedState(): boolean {
     try {
-      return localStorage.getItem(STORAGE_KEYS.savedState) !== null;
+      const exists = localStorage.getItem(STORAGE_KEYS.savedState) !== null;
+      console.info(`[GameStatePersistence] hasSavedState: ${exists}`);
+      return exists;
     } catch {
       return false;
     }

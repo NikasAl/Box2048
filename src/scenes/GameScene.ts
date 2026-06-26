@@ -117,7 +117,14 @@ export class GameScene extends Phaser.Scene {
     this.spawner = new Spawner(this);
     this.mergeSystem = new MergeSystem(this);
     this.scoreSystem = new ScoreSystem();
-    this.scoreSystem.onScoreChanged((s) => this.updateScoreUI(s.score, s.best));
+    this.scoreSystem.onScoreChanged((s) => {
+      this.updateScoreUI(s.score, s.best);
+      // Save state every time the score changes — this is the most reliable
+      // trigger because it fires on every merge (the meaningful game event).
+      // Combined with the visibilitychange handler below, this guarantees
+      // the state is persisted before the player leaves the app/tab.
+      this.saveCurrentState();
+    });
     this.gameOverDetector = new GameOverDetector(this, this);
     this.shockWaveSystem = new ShockWaveSystem(this);
 
@@ -165,16 +172,10 @@ export class GameScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       // Save the current game state BEFORE destroying the scene — so the
       // player can resume after returning to the menu or closing the app.
-      // (State is cleared separately on game over — see triggerGameOver.)
-      if (!this.gameOverDetector.isGameOver()) {
-        GameStatePersistence.saveFromScene({
-          cubes: this.cubes,
-          score: this.scoreSystem.getScore(),
-          best: this.scoreSystem.getBest(),
-          nextValue: this.nextValue,
-          reachedMilestones: this.reachedMilestones
-        });
-      }
+      // (State is cleared separately on game over — see triggerGameOver.
+      //  In practice this is a backup save — the primary save happens on
+      //  every score change via the onScoreChanged callback above.)
+      this.saveCurrentState();
       this.tweens.killAll();
       this.time.removeAllEvents();
       // Clear the cubes Set so destroyed cubes can be GC'd.
@@ -183,6 +184,8 @@ export class GameScene extends Phaser.Scene {
       this.queuedTap = null;
       // Hide the banner ad when leaving the gameplay scene.
       AdsManager.getInstance().hideBanner().catch(() => {});
+      // Remove the visibilitychange listener (registered in create() below).
+      window.removeEventListener('visibilitychange', this.onVisibilityChange);
     });
 
     // Spawn the first cube (only if no saved state was restored — saved
@@ -198,7 +201,24 @@ export class GameScene extends Phaser.Scene {
     // (No-op on web; on native Android the BannerAdView is overlaid
     // via the YandexAds plugin.)
     AdsManager.getInstance().showBanner().catch(() => {});
+
+    // Save state when the tab is hidden / app is backgrounded — covers
+    // the case where the player closes the tab or switches apps without
+    // triggering a scene SHUTDOWN first. (SHUTDOWN only fires on scene
+    // transitions, not on tab close.) Bound as an arrow function field
+    // so the same reference can be removed in the SHUTDOWN handler above.
+    window.addEventListener('visibilitychange', this.onVisibilityChange);
   }
+
+  /**
+   * Arrow function field so we can pass the same reference to both
+   * addEventListener and removeEventListener.
+   */
+  private onVisibilityChange = (): void => {
+    if (document.visibilityState === 'hidden') {
+      this.saveCurrentState();
+    }
+  };
 
   update(_time: number, deltaMs: number): void {
     const delta = deltaMs / 1000;
@@ -606,5 +626,23 @@ export class GameScene extends Phaser.Scene {
       cube.setAngularVelocity(0);
       this.cubes.add(cube);
     }
+  }
+
+  /**
+   * Persist the current game state to localStorage. Called on every score
+   * change (the most reliable trigger — fires on every merge), on scene
+   * shutdown, and on visibilitychange (tab close / app background).
+   *
+   * No-op if the game is over (the state was already cleared by triggerGameOver).
+   */
+  private saveCurrentState(): void {
+    if (this.gameOverDetector.isGameOver()) return;
+    GameStatePersistence.saveFromScene({
+      cubes: this.cubes,
+      score: this.scoreSystem.getScore(),
+      best: this.scoreSystem.getBest(),
+      nextValue: this.nextValue,
+      reachedMilestones: this.reachedMilestones
+    });
   }
 }
