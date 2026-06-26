@@ -80,22 +80,29 @@ export const SPAWN_WEIGHTS: number[] = [50, 30, 15, 5]; // % probabilities
 export const MAX_CUBE_VALUE = 2048;
 
 // Visual style per cube value. Colors inspired by 2048 palette, tuned for visibility.
+//
+// Size rationale:
+//   Field width is 480px (FIELD_LEFT=30, FIELD_RIGHT=510, GAME_WIDTH=540).
+//   7 cubes of 64px = 448px + 6 gaps of ~5px = 478px → fits with 2px slack.
+//   Previously 8 cubes of 56px fit (8*56=448). We increased the base size
+//   by ~14% (56→64) per user request so 7×64 cubes fill the width — this
+//   makes the gameplay feel more substantial without crowding the field.
 export const CUBE_STYLES: Record<number, { bg: number; text: number; size: number }> = {
-  2: { bg: 0xeee4da, text: 0x776e65, size: 56 },
-  4: { bg: 0xede0c8, text: 0x776e65, size: 56 },
-  8: { bg: 0xf2b179, text: 0xffffff, size: 56 },
-  16: { bg: 0xf59563, text: 0xffffff, size: 56 },
-  32: { bg: 0xf67c5f, text: 0xffffff, size: 60 },
-  64: { bg: 0xf65e3b, text: 0xffffff, size: 60 },
-  128: { bg: 0xedcf72, text: 0xffffff, size: 64 },
-  256: { bg: 0xedcc61, text: 0xffffff, size: 64 },
-  512: { bg: 0xedc850, text: 0xffffff, size: 70 },
-  1024: { bg: 0xedc53f, text: 0xffffff, size: 76 },
-  2048: { bg: 0xedc22e, text: 0xffffff, size: 80 }
+  2: { bg: 0xeee4da, text: 0x776e65, size: 64 },
+  4: { bg: 0xede0c8, text: 0x776e65, size: 64 },
+  8: { bg: 0xf2b179, text: 0xffffff, size: 64 },
+  16: { bg: 0xf59563, text: 0xffffff, size: 64 },
+  32: { bg: 0xf67c5f, text: 0xffffff, size: 68 },
+  64: { bg: 0xf65e3b, text: 0xffffff, size: 68 },
+  128: { bg: 0xedcf72, text: 0xffffff, size: 72 },
+  256: { bg: 0xedcc61, text: 0xffffff, size: 72 },
+  512: { bg: 0xedc850, text: 0xffffff, size: 80 },
+  1024: { bg: 0xedc53f, text: 0xffffff, size: 86 },
+  2048: { bg: 0xedc22e, text: 0xffffff, size: 90 }
 };
 
 export function getCubeSize(value: number): number {
-  return CUBE_STYLES[value]?.size ?? 80;
+  return CUBE_STYLES[value]?.size ?? 90;
 }
 
 export function getCubeColor(value: number): { bg: number; text: number } {

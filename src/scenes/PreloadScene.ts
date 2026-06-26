@@ -47,7 +47,8 @@ export class PreloadScene extends Phaser.Scene {
       };
       const size = style.size;
       const radius = 10;
-      const fontSize = value < 100 ? 30 : value < 1000 ? 24 : 20;
+      // Font sizes scaled up to match the larger cubes (was 30/24/20).
+      const fontSize = value < 100 ? 34 : value < 1000 ? 28 : 22;
 
       const canvas = this.textures.createCanvas(`cube-${value}`, size, size);
       if (!canvas) {

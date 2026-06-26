@@ -123,12 +123,14 @@ export class MenuScene extends Phaser.Scene {
     label: string,
     onClick: () => void
   ): void {
+    // Button shrunk slightly to fit two stacked buttons (Continue + New game)
+    // on smaller screens. Was 220x70 with 32px text; now 220x56 with 22px text.
     const w = 220;
-    const h = 70;
+    const h = 56;
     const container = this.add.container(x, y);
     const bg = this.add.graphics();
     bg.fillStyle(COLORS.buttonPrimary, 1);
-    bg.fillRoundedRect(-w / 2, -h / 2, w, h, 16);
+    bg.fillRoundedRect(-w / 2, -h / 2, w, h, 14);
     bg.setInteractive(
       new Phaser.Geom.Rectangle(-w / 2, -h / 2, w, h),
       Phaser.Geom.Rectangle.Contains
@@ -136,7 +138,7 @@ export class MenuScene extends Phaser.Scene {
     const text = this.add
       .text(0, 0, label, {
         fontFamily: 'Arial Black, Arial, sans-serif',
-        fontSize: '32px',
+        fontSize: '22px',
         color: '#ffffff'
       })
       .setOrigin(0.5);
@@ -146,12 +148,12 @@ export class MenuScene extends Phaser.Scene {
     bg.on('pointerover', () => {
       bg.clear();
       bg.fillStyle(COLORS.buttonPrimaryHover, 1);
-      bg.fillRoundedRect(-w / 2, -h / 2, w, h, 16);
+      bg.fillRoundedRect(-w / 2, -h / 2, w, h, 14);
     });
     bg.on('pointerout', () => {
       bg.clear();
       bg.fillStyle(COLORS.buttonPrimary, 1);
-      bg.fillRoundedRect(-w / 2, -h / 2, w, h, 16);
+      bg.fillRoundedRect(-w / 2, -h / 2, w, h, 14);
     });
   }
 
