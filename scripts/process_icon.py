@@ -9,20 +9,30 @@ CRITICAL DESIGN DECISION (per user feedback):
   all its original pixels (white included) — and resized into the various
   Android icon sizes.
 
+CONTOUR REMOVAL (per latest user feedback):
+  The white border/contour around the artwork (the rectangular padding
+  between the artwork's actual edge and the bounding box) is removed by
+  making border-connected background pixels TRANSPARENT. This uses a
+  flood-fill from the image edges — only background pixels that are
+  connected (through other background pixels) to the image border are
+  made transparent. White pixels DEEP INSIDE the artwork (e.g. white text,
+  highlights) are preserved because they are enclosed by non-background
+  pixels and not connected to the border.
+
 Pipeline:
   1. Load raw image, convert to RGBA.
   2. Sample the 4 corners to determine the background color (typically
      white or near-white).
-  3. Build a binary mask: 255 = background, 0 = artwork.
+  3. Build a binary mask: True = background, False = artwork.
   4. Invert it to get the artwork mask, find its bounding box.
-  5. Crop the ORIGINAL image (with its original pixels) to that bounding
-     box, plus a small padding margin.
-  6. Make the cropped artwork square (pad with the background color on
+  5. Crop the ORIGINAL image to that bounding box (minimal 2% padding).
+  6. Make border-connected background pixels TRANSPARENT via flood fill.
+  7. Make the cropped artwork square (pad with TRANSPARENT pixels on
      the shorter sides so the artwork stays centered).
-  7. Resize to all required Android sizes.
-  8. For round icons: apply a circular alpha mask.
-  9. For adaptive foreground: paste the square artwork at 66% scale on
-     a transparent canvas (Android safe-zone requirement).
+  8. Resize to all required Android sizes.
+  9. For round icons: apply a circular alpha mask.
+  10. For adaptive foreground: paste the square artwork at 66% scale on
+      a transparent canvas (Android safe-zone requirement).
 
 Outputs:
   Without --android:
@@ -53,6 +63,13 @@ except ImportError:
     print("ERROR: pip install pillow", file=sys.stderr)
     sys.exit(1)
 
+try:
+    import numpy as np
+    from scipy import ndimage
+except ImportError:
+    print("ERROR: pip install numpy scipy", file=sys.stderr)
+    sys.exit(1)
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -68,9 +85,17 @@ ANDROID_RES = PROJECT_ROOT / "android" / "app" / "src" / "main" / "res"
 BG_TOLERANCE = 60
 
 # Padding (in % of the cropped artwork's smaller dimension) added around the
-# artwork. This is INSIDE the cropped square — it adds more of the original
-# background color around the artwork, not transparent pixels.
-ARTWORK_PADDING_PCT = 0.08  # 8%
+# artwork. Kept small (2%) — just enough to avoid clipping anti-aliased edges.
+# The old 8% padding was the source of the "white contour" — it added a thick
+# white border around the artwork. Now the padding is transparent (see
+# make_square_transparent) and the background is removed via flood fill.
+ARTWORK_PADDING_PCT = 0.02  # 2%
+
+# The adaptive icon background color — the area behind the foreground artwork
+# on Android 8+ adaptive icons. Set to the game's dark navy so it blends
+# with the app's overall visual identity. The old value was the sampled
+# background color (white), which created a white square behind the icon.
+ADAPTIVE_BG_COLOR_HEX = "#1a1a2e"
 
 # Android density sizes.
 LEGACY_SIZES = {
@@ -138,6 +163,62 @@ def make_background_mask(img: Image.Image, bg_color: tuple[int, int, int], toler
     return combined
 
 
+def make_background_transparent(
+    img: Image.Image,
+    bg_color: tuple[int, int, int],
+    tolerance: int,
+) -> Image.Image:
+    """
+    Make border-connected background pixels transparent.
+
+    Uses a flood-fill approach: only background-colored pixels that are
+    connected (through other background pixels) to the image border are
+    made transparent. White pixels DEEP INSIDE the artwork (e.g. white text,
+    highlights) are preserved because they are enclosed by non-background
+    pixels and not connected to the border.
+
+    This is the "magic wand" tool from image editors — select background by
+    clicking on the border, and only the connected region is removed.
+
+    Algorithm:
+      1. Build a boolean mask: True = background (within color tolerance).
+      2. Use scipy.ndimage.label to find connected components in the mask.
+      3. Identify which components touch the image border (any of the 4 edges).
+      4. Set alpha=0 for pixels in border-connected components.
+      5. Keep ALL other pixels (artwork + enclosed white) unchanged.
+    """
+    arr = np.array(img.convert("RGBA"))
+    rgb = arr[:, :, :3].astype(int)
+
+    # Step 1: boolean mask — True where pixel is "background" color.
+    bg_mask = np.all(np.abs(rgb - bg_color) <= tolerance, axis=2)
+
+    # Step 2: label connected components (8-connectivity for diagonal).
+    structure = np.ones((3, 3), dtype=int)  # 8-connectivity
+    labeled, num_labels = ndimage.label(bg_mask, structure=structure)
+
+    if num_labels == 0:
+        return img  # No background at all — nothing to do.
+
+    # Step 3: find labels that touch the image border.
+    border_labels = set()
+    border_labels.update(labeled[0, :].tolist())        # top row
+    border_labels.update(labeled[-1, :].tolist())       # bottom row
+    border_labels.update(labeled[:, 0].tolist())        # left column
+    border_labels.update(labeled[:, -1].tolist())       # right column
+    border_labels.discard(0)  # 0 = non-background (artwork)
+
+    # Step 4: set alpha=0 for pixels in border-connected components.
+    border_bg = np.isin(labeled, list(border_labels))
+    arr[border_bg, 3] = 0  # Set alpha = 0
+
+    result = Image.fromarray(arr)
+    bg_pixel_count = int(border_bg.sum())
+    print(f"  made {bg_pixel_count} border-connected background pixels transparent")
+    print(f"  preserved {int(bg_mask.sum() - bg_pixel_count)} interior background pixels")
+    return result
+
+
 def find_artwork_bbox(mask: Image.Image) -> tuple[int, int, int, int]:
     """
     Given a mask where 255=background and 0=artwork, find the bounding box
@@ -162,8 +243,6 @@ def crop_with_padding(
 ) -> Image.Image:
     """
     Crop the ORIGINAL image to bbox + padding (clamped to image bounds).
-    The padding extends into the original image, so it will contain the
-    original background color — not transparent pixels.
     """
     left, top, right, bottom = bbox
     w = right - left
@@ -176,19 +255,15 @@ def crop_with_padding(
     return img.crop((left, top, right, bottom))
 
 
-def make_square_with_background(
-    img: Image.Image,
-    bg_color: tuple[int, int, int],
-) -> Image.Image:
+def make_square_transparent(img: Image.Image) -> Image.Image:
     """
-    Pad the image (centered) to a square, filling the new area with the
-    background color so the artwork stays visually consistent.
+    Pad the image (centered) to a square with TRANSPARENT pixels on the
+    shorter sides. This replaces the old make_square_with_background which
+    filled with the white background color — the source of the white contour.
     """
     w, h = img.size
     side = max(w, h)
-    # Build the fill color in RGBA (alpha 255 — opaque background).
-    fill_rgba = (bg_color[0], bg_color[1], bg_color[2], 255)
-    canvas = Image.new("RGBA", (side, side), fill_rgba)
+    canvas = Image.new("RGBA", (side, side), (0, 0, 0, 0))
     canvas.paste(img, ((side - w) // 2, (side - h) // 2), img)
     return canvas
 
@@ -298,12 +373,15 @@ def main() -> None:
     bbox = find_artwork_bbox(mask)
     print(f"  artwork bbox: {bbox}  ({bbox[2]-bbox[0]}x{bbox[3]-bbox[1]})")
 
-    print("\nCropping ORIGINAL image (with background intact) to bbox + padding:")
+    print("\nCropping ORIGINAL image to bbox + 2% padding:")
     cropped = crop_with_padding(raw, bbox, ARTWORK_PADDING_PCT)
     print(f"  cropped size: {cropped.size[0]}x{cropped.size[1]}")
 
-    print("\nMaking square (padding shorter sides with the background color):")
-    artwork_square = make_square_with_background(cropped, bg)
+    print("\nRemoving white contour (flood-fill from edges → transparent):")
+    transparent_bg = make_background_transparent(cropped, bg, BG_TOLERANCE)
+
+    print("\nMaking square (padding shorter sides with TRANSPARENT pixels):")
+    artwork_square = make_square_transparent(transparent_bg)
     print(f"  square size: {artwork_square.size[0]}x{artwork_square.size[1]}")
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -339,12 +417,15 @@ def main() -> None:
             save_png(fg, out_dir / "ic_launcher_foreground.png", f"{density} foreground")
 
         print("\nWriting adaptive icon XML + color resource:")
-        # Use the sampled background color as the adaptive icon background color,
-        # so the area outside the 66% foreground matches the artwork's background.
-        bg_hex = "#{:02x}{:02x}{:02x}".format(*bg)
+        # Use the game's dark navy as the adaptive icon background — this is
+        # the color that shows behind the 66% foreground artwork on Android
+        # 8+ adaptive icons. The old value was the sampled background color
+        # (white), which created a white square behind the icon. With the
+        # contour now transparent, the dark navy shows through and matches
+        # the app's visual identity.
         write_color_xml(
             ANDROID_RES / "values" / "ic_launcher_background.xml",
-            bg_hex,
+            ADAPTIVE_BG_COLOR_HEX,
         )
         write_adaptive_xml(
             ANDROID_RES / "mipmap-anydpi-v26" / "ic_launcher.xml",
