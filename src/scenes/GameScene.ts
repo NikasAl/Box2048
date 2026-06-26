@@ -45,6 +45,7 @@ import { AudioManager } from '../systems/AudioManager';
 import { AdsManager } from '../ads/AdsManager';
 import { i18n } from '../systems/I18n';
 import { GameStatePersistence, type SavedGameState } from '../systems/GameStatePersistence';
+import { solveLaunch } from '../systems/LaunchSolver';
 
 export class GameScene extends Phaser.Scene {
   // World bounds (as Matter static walls)
@@ -437,14 +438,24 @@ export class GameScene extends Phaser.Scene {
     // two timers would fire 200ms later and spawn two cubes at the same spot.
     if (this.currentCube.isLaunched()) return;
     const cube = this.currentCube;
-    const dx = targetX - cube.x;
-    const dy = targetY - cube.y;
-    const dist = Math.max(1, Math.hypot(dx, dy));
-    const speed = Math.min(LAUNCH_MAX_SPEED, LAUNCH_SPEED);
-    const vx = (dx / dist) * speed;
-    const vy = (dy / dist) * speed;
 
-    cube.launch(vx, vy);
+    // Use the ballistic solver to compute (vx, vy) that lands the cube at
+    // the tap point, accounting for gravity and air friction. The solver
+    // searches over flight time T and simulates trajectories with Matter's
+    // actual physics constants to find the best match.
+    //
+    // This fixes the bug where cubes landed several cubes short of the tap
+    // point at field edges — the old code used a constant speed toward the
+    // target and ignored gravity drop.
+    const solution = solveLaunch(
+      cube.x,
+      cube.y,
+      targetX,
+      targetY,
+      LAUNCH_MAX_SPEED
+    );
+
+    cube.launch(solution.vx, solution.vy);
 
     // Cooldown before next cube appears.
     this.canLaunch = false;

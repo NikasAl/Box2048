@@ -61,8 +61,22 @@ export const WALL_PHYSICS = {
 };
 
 // Launch tuning: how fast the cube is thrown toward the tap point.
-export const LAUNCH_SPEED = 9; // px per physics tick (Matter scales internally)
-export const LAUNCH_MAX_SPEED = 14;
+//
+// LAUNCH_SPEED is the BASE speed used by the solver when no specific
+// solution is needed — currently unused since the solver always picks a
+// speed based on the trajectory.
+//
+// LAUNCH_MAX_SPEED caps the maximum initial velocity. The ballistic solver
+// (src/systems/LaunchSolver.ts) searches for a (vx, vy) that lands the cube
+// at the tap point, but won't exceed this cap. Set high enough that cubes
+// can reach the edges of the field — the solver will use lower speeds for
+// close targets automatically.
+//
+// Old values (9 / 14) were too low — cubes couldn't reach field edges
+// before gravity pulled them down, landing 3+ cubes short of the tap.
+// 22 allows reaching all corners of the field with the iterative solver.
+export const LAUNCH_SPEED = 12;
+export const LAUNCH_MAX_SPEED = 22;
 
 // Cooldown before the next cube spawns after a launch.
 // Lower = faster gameplay (player can spam-tap).
