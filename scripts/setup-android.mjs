@@ -247,7 +247,6 @@ import com.yandex.mobile.ads.rewarded.RewardedAdLoader;
 import android.view.Gravity;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
-import android.widget.RelativeLayout;
 
 @CapacitorPlugin(
     name = "YandexAds"
@@ -611,17 +610,23 @@ public class YandexAdsPlugin extends Plugin {
                 });
 
                 // Add the banner to the activity's root content view,
-                // anchored to the bottom-center. Using RelativeLayout rules
-                // (ALIGN_PARENT_BOTTOM + CENTER_HORIZONTAL) — same approach
-                // as Di2048, more reliable than FrameLayout gravity on
-                // some OEM ROMs.
+                // anchored to the bottom-center.
+                //
+                // Capacitor's BridgeActivity uses a FrameLayout as
+                // android.R.id.content. RelativeLayout rules (ALIGN_PARENT_BOTTOM)
+                // are silently IGNORED when the parent is a FrameLayout —
+                // the view just lands at top-left. That's why the banner
+                // was appearing at the top of the screen.
+                //
+                // Fix: use FrameLayout.LayoutParams with Gravity.BOTTOM.
+                // Di2048 uses RelativeLayout because they own the root layout;
+                // we don't (Capacitor does), so we must match its FrameLayout.
                 ViewGroup rootView = (ViewGroup) activity.findViewById(android.R.id.content);
-                RelativeLayout.LayoutParams params = new RelativeLayout.LayoutParams(
-                    RelativeLayout.LayoutParams.MATCH_PARENT,
-                    RelativeLayout.LayoutParams.WRAP_CONTENT
+                FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT
                 );
-                params.addRule(RelativeLayout.CENTER_HORIZONTAL);
-                params.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM);
+                params.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
                 bannerAdView.setLayoutParams(params);
                 rootView.addView(bannerAdView);
 
