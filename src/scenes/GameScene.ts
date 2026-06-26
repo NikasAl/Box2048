@@ -46,6 +46,7 @@ import { AdsManager } from '../ads/AdsManager';
 import { i18n } from '../systems/I18n';
 import { GameStatePersistence, type SavedGameState } from '../systems/GameStatePersistence';
 import { solveLaunch } from '../systems/LaunchSolver';
+import { TiltController } from '../systems/TiltController';
 
 export class GameScene extends Phaser.Scene {
   // World bounds (as Matter static walls)
@@ -88,6 +89,10 @@ export class GameScene extends Phaser.Scene {
   private nextCubeText!: Phaser.GameObjects.Text;
   private dangerLine!: Phaser.GameObjects.Line;
   private dangerFlash: number = 0; // 0..1 intensity
+
+  // Tilt toggle button + indicator (gravity direction visualization)
+  private tiltButton!: Phaser.GameObjects.Text;
+  private tiltIndicator!: Phaser.GameObjects.Graphics;
 
   // Track the next value to spawn, so we can preview it.
   private nextValue: number = 2;
@@ -185,6 +190,8 @@ export class GameScene extends Phaser.Scene {
       this.queuedTap = null;
       // Hide the banner ad when leaving the gameplay scene.
       AdsManager.getInstance().hideBanner().catch(() => {});
+      // Disable tilt control to stop the DeviceMotion listener.
+      TiltController.disable();
       // Remove the visibilitychange listener (registered in create() below).
       window.removeEventListener('visibilitychange', this.onVisibilityChange);
     });
@@ -227,6 +234,15 @@ export class GameScene extends Phaser.Scene {
       this.gameOverDetector.update(delta);
     }
     this.updateDangerLinePulse(delta);
+
+    // Apply tilt-controlled gravity to the Matter world.
+    // When tilt is disabled, this returns the default downward gravity (1.2).
+    // When enabled, gx shifts cubes sideways and gy adjusts fall speed.
+    const g = TiltController.getGravity();
+    this.matter.world.setGravity(g.x, g.y);
+
+    // Update the tilt indicator UI (small icon showing current tilt direction).
+    this.updateTiltIndicator();
 
     // Keep the current (un-launched) cube floating at the top.
     if (this.currentCube && this.currentCube.isFloating()) {
@@ -354,7 +370,70 @@ export class GameScene extends Phaser.Scene {
       color: '#ffffff'
     }).setOrigin(0.5);
 
+    // Tilt toggle button — bottom-right corner, above the banner ad area.
+    // Tapping toggles tilt control on/off. Long-press (not implemented) would
+    // recalibrate; for now, toggling off+on serves as recalibration.
+    this.tiltButton = this.add.text(GAME_WIDTH - 16, 90, this.getTiltButtonLabel(), {
+      fontFamily: 'Arial, sans-serif',
+      fontSize: '14px',
+      color: '#8a8aa8'
+    }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
+
+    this.tiltButton.on('pointerup', async () => {
+      if (TiltController.isEnabled()) {
+        TiltController.disable();
+        this.tiltButton.setText(this.getTiltButtonLabel());
+        this.tiltButton.setColor('#8a8aa8');
+      } else {
+        // iOS permission request must come from a user gesture — this tap counts.
+        this.tiltButton.setText(i18n.t('game.tilt.calibrate'));
+        const ok = await TiltController.enable();
+        if (ok) {
+          this.tiltButton.setText(this.getTiltButtonLabel());
+          this.tiltButton.setColor('#e94560');
+        } else {
+          this.tiltButton.setText(this.getTiltButtonLabel());
+          this.tiltButton.setColor('#8a8aa8');
+        }
+      }
+    });
+
+    // Tilt indicator — a small circle with a dot showing current gravity
+    // direction. Visible only when tilt is enabled.
+    this.tiltIndicator = this.add.graphics();
+    this.tiltIndicator.setDepth(10);
+
     this.updateScoreUI(0, best);
+  }
+
+  private getTiltButtonLabel(): string {
+    return `${i18n.t('game.tilt')}: ${TiltController.isEnabled() ? i18n.t('game.tilt.on') : i18n.t('game.tilt.off')}`;
+  }
+
+  /**
+   * Redraw the tilt indicator — a small circle in the top-left corner with
+   * a dot showing the current gravity direction. Only drawn when tilt is on.
+   */
+  private updateTiltIndicator(): void {
+    this.tiltIndicator.clear();
+    if (!TiltController.isEnabled()) return;
+
+    const cx = 70;
+    const cy = 90;
+    const r = 16;
+
+    // Outer circle (always)
+    this.tiltIndicator.lineStyle(2, 0x8a8aa8, 0.6);
+    this.tiltIndicator.strokeCircle(cx, cy, r);
+
+    // Direction dot — position based on tilt angle
+    const tiltDeg = TiltController.getTiltDegrees();
+    const angleRad = (tiltDeg * Math.PI) / 180;
+    const dotX = cx + Math.sin(angleRad) * (r - 4);
+    const dotY = cy + Math.cos(angleRad) * (r - 4); // 0° = straight down
+
+    this.tiltIndicator.fillStyle(0xe94560, 1);
+    this.tiltIndicator.fillCircle(dotX, dotY, 4);
   }
 
   private updateScoreUI(score: number, best: number): void {

@@ -31,6 +31,10 @@ const translations: Record<Language, Record<string, string>> = {
     'game.score': 'ОЧКИ',
     'game.best': 'РЕКОРД',
     'game.next': 'СЛЕД.',
+    'game.tilt': 'НАКЛОН',
+    'game.tilt.on': 'ВКЛ',
+    'game.tilt.off': 'ВЫКЛ',
+    'game.tilt.calibrate': 'Калибровка...',
 
     'gameover.title': 'ИГРА ОКОНЧЕНА',
     'gameover.score': 'Счёт',
@@ -59,6 +63,10 @@ const translations: Record<Language, Record<string, string>> = {
     'game.score': 'SCORE',
     'game.best': 'BEST',
     'game.next': 'NEXT',
+    'game.tilt': 'TILT',
+    'game.tilt.on': 'ON',
+    'game.tilt.off': 'OFF',
+    'game.tilt.calibrate': 'Calibrating...',
 
     'gameover.title': 'GAME OVER',
     'gameover.score': 'Score',
